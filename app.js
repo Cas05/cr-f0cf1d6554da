@@ -13,6 +13,7 @@
   function load() {
     try { db = JSON.parse(localStorage.getItem(KEY)); } catch (e) { db = null; }
     if (!db || !db.settings) { db = { settings: clone(SAMPLE.settings), trips: clone(SAMPLE.trips), v: 1 }; save(true); }
+    if (!db.requests) db.requests = [];
   }
   var saveTimer;
   function save(now) {
@@ -50,11 +51,13 @@
     if (parts[0] === 'share') return renderShared(parts.slice(1).join('/'));
     if (parts[0] === 'settings') { nav('settings'); return renderSettings(); }
     if (parts[0] === 'help') { nav('help'); return renderHelp(); }
+    if (parts[0] === 'requests' && window.TSReq) { nav('requests'); return window.TSReq.renderList(); }
+    if (parts[0] === 'request' && parts[1] && window.TSReq) { nav('requests'); return window.TSReq.renderDetail(parts[1]); }
     if (parts[0] === 'trip' && trip(parts[1])) { nav('trips'); return renderTrip(trip(parts[1]), parts[2] || 'details'); }
     nav('trips'); renderTrips();
   }
   function nav(n) { var a = document.querySelector('[data-nav="' + n + '"]'); if (a) a.classList.add('on'); }
-  window.addEventListener('hashchange', function () { save(true); route(); window.scrollTo(0, 0); });
+  window.addEventListener('hashchange', function () { save(true); if (window.TSReq) window.TSReq.stopPoll(); route(); window.scrollTo(0, 0); });
 
   /* ---------- trips list ---------- */
   function renderTrips() {
@@ -74,7 +77,7 @@
         '<div class="tc-acts"><a class="btn sm" href="#/trip/' + t.id + '/preview">Client view</a><button class="btn sm" data-act="dup-trip" data-id="' + t.id + '">Duplicate</button><button class="btn sm danger" data-act="del-trip" data-id="' + t.id + '">Delete</button></div></article>';
     });
     html += '</div>';
-    html += '<section class="card data"><h2>Backup &amp; data</h2><p class="muted">Everything is saved only in this browser on this device. Nothing is sent to a server. Export a backup now and then, and use Import to move trips to another phone or computer.</p>' +
+    html += '<section class="card data"><h2>Backup &amp; data</h2><p class="muted">Trips and rates are saved only in this browser on this device. (Only trip requests you send to Jarvis go to a server.) Export a backup now and then, and use Import to move trips to another phone or computer.</p>' +
       '<div class="btns"><button class="btn" data-act="export">Export backup (JSON)</button><label class="btn">Import backup<input type="file" accept=".json,application/json" id="importFile" hidden></label><button class="btn" data-act="add-samples">Re-add example trips</button><button class="btn danger" data-act="clear-examples">Remove example trips</button></div></section>';
     app.innerHTML = html;
     var f = document.getElementById('importFile');
@@ -96,6 +99,7 @@
         if (replace) db.settings = d.settings;
         var n = 0;
         (d.trips || []).forEach(function (t) { var ex = db.trips.findIndex(function (x) { return x.id === t.id; }); if (ex >= 0) db.trips[ex] = t; else db.trips.push(t); n++; });
+        (d.requests || []).forEach(function (q) { if (q && q.id && !db.requests.some(function (x) { return x.id === q.id; })) db.requests.push(q); });
         save(true); toast('Imported ' + n + ' trip' + (n === 1 ? '' : 's')); route();
       } catch (e) { alert('That file does not look like a Trip Studio backup.'); }
     };
@@ -306,6 +310,7 @@
       '<li><b>Add bookings.</b> Base fare goes in <i>Base cost</i>. Taxes, port fees and gratuities go in <i>Taxes / fees</i> (no commission). The client total, per-person price, gross commission and your take-home update as you type.</li>' +
       '<li><b>Write the day-by-day.</b> “Fill in days from trip dates” creates one card per day.</li>' +
       '<li><b>Send it.</b> Client itinerary → Print / Save as PDF, or Copy share link. Commission never appears there.</li>' +
+      '<li><b>Ask Jarvis to research a trip.</b> Open <a href="#/requests">Requests</a>, type what the client wants in plain English and tap Send. Jarvis finds cruises, flights and excursions and sends back 2–3 packages. Open a ready request to compare them, tap <i>Load into trip builder</i> to edit one here, or <i>Copy client message</i> to text the options.</li>' +
       '<li><b>Back up.</b> Trips → Export backup. Your data lives only in this browser. Clearing Safari/Chrome data erases it unless you have a backup.</li></ol>' +
       '<p class="muted">Tip: on iPhone, tap Share → Add to Home Screen to open it like an app.</p>' +
       '<p class="muted">This tool estimates commission from the rates you enter. Your Fora portal is the source of truth for actual payouts.</p></section>';
@@ -347,7 +352,7 @@
       case 'new-trip': return newTrip();
       case 'dup-trip': var src = trip(tid), c = clone(src); c.id = uid('t'); c.title = (src.title || 'Trip') + ' (copy)'; delete c.example; c.items.forEach(function (i) { i.id = uid('i'); }); db.trips.push(c); save(true); toast('Duplicated'); return route();
       case 'del-trip': if (confirm('Delete "' + trip(tid).title + '"? This cannot be undone.')) { db.trips = db.trips.filter(function (x) { return x.id !== tid; }); save(true); route(); } return;
-      case 'export': download('trip-studio-backup-' + iso(new Date()) + '.json', JSON.stringify({ app: 'Booked by Castleberry Trip Studio', exported: new Date().toISOString(), settings: db.settings, trips: db.trips }, null, 2)); return toast('Backup downloaded');
+      case 'export': download('trip-studio-backup-' + iso(new Date()) + '.json', JSON.stringify({ app: 'Booked by Castleberry Trip Studio', exported: new Date().toISOString(), settings: db.settings, trips: db.trips, requests: (db.requests || []).map(function (q) { return { id: q.id, created: q.created, text: q.text, client: q.client }; }) }, null, 2)); return toast('Backup downloaded');
       case 'export-trip': download((t.title || 'trip').replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.json', JSON.stringify({ trip: t }, null, 2)); return;
       case 'add-samples': clone(SAMPLE.trips).forEach(function (s) { if (!trip(s.id)) db.trips.push(s); }); save(true); toast('Example trips added'); return route();
       case 'clear-examples': if (confirm('Remove the example trips?')) { db.trips = db.trips.filter(function (x) { return !x.example; }); save(true); route(); } return;
@@ -392,5 +397,6 @@
 
   /* expose for tests */
   window.__TS = { db: function () { return db; }, clientPayload: clientPayload, clientDoc: clientDoc, b64e: b64e, b64d: b64d, shareUrl: shareUrl };
+  window.TS = { db: function () { return db; }, save: save, route: route, toast: toast, esc: esc, money: money, uid: uid, clone: clone, fdate: fdate, fday: fday, pd: pd, iso: iso, app: app };
   load(); route();
 })();
