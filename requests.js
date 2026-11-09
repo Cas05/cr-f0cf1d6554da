@@ -131,6 +131,7 @@
       sups.find(function (s) { return n && s.name && s.name.toLowerCase().indexOf(n) > -1 && n.length > 3; }) ||
       sups.find(function (s) { return s.type === type; });
   }
+  function flightTotal(f, party) { var t = num(f.fare_total); if (t != null) return t; var pp = num(f.fare_pp); return pp == null ? null : Math.round(pp * party * 100) / 100; }
   function num(v) { return v == null || v === '' || !isFinite(v) ? null : +v; }
   function pkgTrip(pkg, B, q) {
     var c = pkg.cruise || {}, party = (B.party && B.party.size) || 2;
@@ -146,9 +147,9 @@
     var tr = pkg.travel || {};
     (tr.flights || []).slice(0, 1).forEach(function (f) {
       if (tr.mode === 'drive') return;
-      var fp = num(f.fare_pp);
-      items.push({ id: uid('i'), category: 'Flights', description: 'Round-trip ' + (f.routing || '') + (f.airline ? ' · ' + f.airline : '') + (f.times ? ' · ' + f.times : '') + (fp == null ? ' (fare to be confirmed)' : ''),
-        supplierId: (supFor('', 'Air') || {}).id || '', cost: fp == null ? '' : fp * party, taxes: '', date: f.depart_date || '', nonCommissionable: true, notes: fp == null ? 'Needs live check: ' + (f.link || '') : srcNote(f.link, f.verified) });
+      var ft = flightTotal(f, party);
+      items.push({ id: uid('i'), category: 'Flights', description: 'Round-trip ' + (f.routing || '') + (f.airline ? ' · ' + f.airline : '') + (f.times ? ' · ' + f.times : '') + (ft == null ? ' (fare to be confirmed)' : ' · economy, ' + party + ' travelers'),
+        supplierId: (supFor('', 'Air') || {}).id || '', cost: ft == null ? '' : ft, taxes: '', date: f.depart_date || '', nonCommissionable: true, notes: ft == null ? 'Needs live check: ' + (f.link || '') : (f.fare_label || srcNote(f.link, f.verified)) + ' ' + (f.link || '') });
     });
     var ho = pkg.hotel;
     if (ho && ho.needed) {
@@ -156,7 +157,7 @@
       items.push({ id: uid('i'), category: 'Hotel', description: 'Pre-cruise night' + (ho.name ? ': ' + ho.name : ' · ' + (ho.area || '')) + ' · ' + (ho.rooms || 1) + ' room' + ((ho.rooms || 1) === 1 ? '' : 's') + (pn == null ? ' (rate to be confirmed)' : ''),
         supplierId: hs ? hs.id : '', cost: pn == null ? '' : pn * (ho.rooms || 1) * (ho.nights || 1), taxes: '', date: ho.check_in || '', notes: pn == null ? 'Needs live check: ' + (ho.link || '') : srcNote(ho.link, ho.verified) });
     }
-    (pkg.ground || []).forEach(function (g) {
+    (pkg.ground || []).filter(function (g) { return !(tr.mode === 'drive' && g.applies_to === 'fly-instead'); }).forEach(function (g) {
       items.push({ id: uid('i'), category: /transfer/i.test(g.name) ? 'Transfers' : 'Other', description: g.name + (num(g.price) == null ? ' (to be confirmed)' : ''), supplierId: '', cost: num(g.price) == null ? '' : g.price, taxes: '', date: c.sail_date || '', nonCommissionable: g.commissionable !== true, notes: g.price_note || g.link || '' });
     });
     var ex = pkg.excursions || {};
@@ -185,9 +186,14 @@
   }
   function fmtSeen(B) { var d = T().pd(B.prices_as_of || ''); return d && !isNaN(d) ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : (B.prices_as_of || 'the research date'); }
   function pkgTotals(pkg, B, q) {
-    var t = pkgTrip(pkg, B, q), r = C.calcTrip(t, db().settings);
-    var missing = t.items.filter(function (i) { return i.cost === ''; }).map(function (i) { return i.category; });
-    return { trip: t, calc: r, missing: missing };
+    var t = pkgTrip(pkg, B, q), core = T().clone(t);
+    core.items = core.items.filter(function (i) { return i.category !== 'Excursion'; });
+    var r = C.calcTrip(core, db().settings);
+    var addons = t.items.filter(function (i) { return i.category === 'Excursion'; }).reduce(function (a, i) { return a + (+i.cost || 0); }, 0);
+    var missing = core.items.filter(function (i) { return i.cost === ''; }).map(function (i) { return i.category; });
+    var tr = pkg.travel || {}, fly = null;
+    if (tr.mode === 'drive' && (tr.flights || [])[0]) { var ft = flightTotal(tr.flights[0], (B.party && B.party.size) || 2); if (ft != null) fly = r.clientTotal + ft; }
+    return { trip: t, calc: r, missing: missing, addons: addons, flyInstead: fly };
   }
   function portsLine(c) { return (c.ports || []).filter(function (p) { return !p.at_sea; }).slice(1, -1).map(function (p) { return p.name; }).join(' · '); }
   function exRow(e, party) {
@@ -223,7 +229,8 @@
         (tr.drive ? '<p class="tiny muted">Drive: ~' + esc(tr.drive.miles) + ' mi · ~' + esc(tr.drive.hours) + ' hrs · <a href="' + esc(tr.drive.source_url) + '" target="_blank" rel="noopener">source</a></p>' : '') +
         (tr.flights || []).map(function (f) {
           return '<div class="fl"><b>' + esc(f.airline || '') + '</b><span>' + esc(f.routing || '') + '</span><small>' + esc(f.depart_date ? T().fdate(f.depart_date) : '') + (f.return_date ? ' → ' + esc(T().fdate(f.return_date)) : '') + (f.times ? ' · ' + esc(f.times) : '') + '</small>' +
-            '<span class="r">' + (num(f.fare_pp) == null ? '<span class="warnline">Fare: ' + esc(f.status || 'needs live check') + '</span>' : '<b>' + money(f.fare_pp, false) + '</b>/pp') + (f.link ? ' · <a href="' + esc(f.link) + '" target="_blank" rel="noopener">Google Flights</a>' : '') + '</span></div>';
+            '<span class="r">' + (flightTotal(f, party) == null ? '<span class="warnline">Fare: ' + esc(f.status || 'needs live check') + '</span>' : '<b>' + money(flightTotal(f, party), false) + '</b> total for ' + party + ' <small class="muted">(~' + money(flightTotal(f, party) / party, false) + '/pp)</small>') + (f.link ? ' · <a href="' + esc(f.link) + '" target="_blank" rel="noopener">Google Flights</a>' : '') + '</span>' +
+            (f.note ? '<small>' + esc(f.note) + '</small>' : '') + (f.fare_label ? '<small class="muted">' + esc(f.fare_label) + '</small>' : '') + '</div>';
         }).join('') + '</div>';
       if (p.hotel && p.hotel.needed) s += '<div class="pk-sec"><h4>🏨 Night before</h4><p>' + esc(p.hotel.name || p.hotel.area) + ' · ' + esc(T().fdate(p.hotel.check_in)) + ' · ' + esc(p.hotel.rooms) + ' rooms</p><p>' + (num(p.hotel.price_per_night) == null ? '<span class="warnline">Rate: ' + esc(p.hotel.status || 'needs live check') + '</span>' : money(p.hotel.price_per_night, false) + '/room/night') + (p.hotel.link ? ' · <a href="' + esc(p.hotel.link) + '" target="_blank" rel="noopener">search</a>' : '') + '</p></div>';
       (p.ground || []).forEach(function (g) { s += '<div class="pk-sec"><h4>🅿 ' + esc(g.name) + '</h4><p class="tiny">' + (num(g.price) == null ? '<span class="warnline">Price: needs live check.</span> ' : money(g.price) + ' ') + esc(g.price_note || '') + (g.link ? ' <a href="' + esc(g.link) + '" target="_blank" rel="noopener">link</a>' : '') + '</p></div>'; });
@@ -231,7 +238,9 @@
       s += '<div class="pk-sec"><h4>🧭 Excursions</h4><details><summary>With ' + esc(c.line || 'the cruise line') + ' (' + (ex.ship || []).length + ')</summary><ul class="exl">' + (ex.ship || []).map(function (e) { return exRow(e, party); }).join('') + '</ul></details>' +
         '<details><summary>Private / independent (' + (ex.private || []).length + ')</summary><ul class="exl">' + (ex.private || []).map(function (e) { return exRow(e, party); }).join('') + '</ul></details>' +
         ((ex.notes || []).length ? '<p class="tiny muted">' + ex.notes.map(esc).join(' ') + '</p>' : '') + '</div>';
-      s += '<div class="pk-tot"><dl class="sum"><dt>Known total for ' + party + '</dt><dd><b>' + money(r.clientTotal, false) + '</b></dd><dt>Per person</dt><dd>' + money(r.perPerson, false) + '</dd></dl>' +
+      s += '<div class="pk-tot"><dl class="sum"><dt>Known total for ' + party + ' (' + (tr.mode === 'drive' ? 'cruise' : 'cruise + flights') + ')</dt><dd><b>' + money(r.clientTotal, false) + '</b></dd><dt>Per person</dt><dd>' + money(r.perPerson, false) + '</dd>' +
+        (tot.flyInstead != null ? '<dt>If flying instead of driving</dt><dd>' + money(tot.flyInstead, false) + '</dd>' : '') +
+        (tot.addons ? '<dt>Suggested add-ons (not in total)</dt><dd>+' + money(tot.addons, false) + '</dd>' : '') + '</dl>' +
         (tot.missing.length ? '<p class="tiny warnline">Not yet priced: ' + esc(tot.missing.filter(function (v, i, a) { return a.indexOf(v) === i; }).join(', ')) + '</p>' : '') +
         '<div class="private"><small>For you only</small><dl class="sum"><dt>Est. gross commission</dt><dd>' + money(r.gross, false) + '</dd><dt>Est. take-home</dt><dd class="earn"><b>' + money(r.takeHome, false) + '</b></dd></dl><p class="tiny muted">Uses your rates in My rates' + (ph ? ' (some are still placeholders)' : '') + '. Cruise commission is on the fare only, not taxes. Flights and cruise-line add-ons counted as non-commissionable.</p></div></div>';
       if ((p.caveats || []).length) s += '<ul class="cav">' + p.caveats.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>';
@@ -251,7 +260,9 @@
     L.push('Ports: ' + portsLine(c));
     L.push('Cruise from about ' + money(c.price_pp, false) + ' per person (' + (c.cabin_type || '').toLowerCase() + ' cabin' + (c.price_includes_taxes ? ', taxes and port fees included' : '') + ')' + (bal ? '; balcony from about ' + money(bal.price_pp, false) + ' per person' : '') + '. About ' + money(c.party_price, false) + ' for all ' + party + '.');
     if (tr.mode === 'drive') L.push('Getting there: ' + (tr.drive ? 'about a ' + Math.round(tr.drive.hours * 2) / 2 + '-hour drive' : 'drive') + ' from Little Rock, no flights needed. I suggest driving down the day before and staying near the port.');
-    else L.push('Getting there: fly in the day before and stay near the port. Flights and the hotel are extra; I\'ll price those for your group.');
+    else { var f0 = (tr.flights || [])[0], ft0 = f0 ? flightTotal(f0, party) : null;
+      L.push('Getting there: fly in the day before and stay near the port.' + (ft0 != null ? ' Flights: ' + f0.routing + ', about ' + money(ft0, false) + ' round trip for all ' + party + ' (economy, as of ' + (f0.price_seen ? T().fdate(f0.price_seen) : 'today') + ').' : '') + ' The hotel is extra; I\'ll price that for your group.'); }
+    if (tr.mode === 'drive') { var fd = (tr.flights || [])[0], fdt = fd ? flightTotal(fd, party) : null; if (fdt != null) L.push('Prefer to fly? ' + fd.routing.split(',')[0] + ' is about ' + money(fdt, false) + ' round trip for all ' + party + '.'); }
     var picks = [].concat((p.excursions || {}).ship || [], (p.excursions || {}).private || []).filter(function (e) { return e.suggested; });
     if (picks.length) L.push('Fun add-ons: ' + picks.map(function (e) { return e.name.split(' (')[0].split(':')[0] + ' (' + (e.port || '') + ', about ' + money(e.price_pp, false) + ' pp)'; }).join('; ') + '.');
     return L.join('\n');
