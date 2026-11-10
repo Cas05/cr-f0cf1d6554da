@@ -54,7 +54,7 @@
       cur = { token: token, r: r };
       var p = r.payload || {};
       document.title = (r.title || 'Your trip') + ' · ' + ((p.b && p.b.brand) || 'Booked by Castleberry');
-      if (r.kind === 'itinerary') app.innerHTML = '<div class="no-print sharebar"><button class="btn sm" onclick="window.print()">Print / Save PDF</button></div>' + window.__TS.clientDoc(p) + depositBox(r, p.b || {});
+      if (r.kind === 'itinerary') app.innerHTML = window.__TS.clientDoc(p) + depositBox(r, p.b || {});
       else app.innerHTML = compareDoc(r);
     }).catch(function () { app.innerHTML = '<div class="card empty">We couldn’t load this page. Check your connection and try again.</div>'; });
   }
@@ -64,7 +64,7 @@
     return '<section class="itin-sec dep no-print"><h2>Ready to hold your spot?</h2><p>Your deposit or planning fee is paid through a secure Fora invoice link.</p><a class="btn primary" href="' + esc(r.deposit_link) + '" target="_blank" rel="noopener">Deposit / planning fee</a><p class="tiny muted">Questions first? Reach out to ' + esc((b.name || 'your advisor').split(' ')[0]) + ' anytime.</p></section>';
   }
   function footer(b) {
-    return '<footer class="itin-foot"><div class="fb">' + esc(b.brand) + '</div><p>' + esc(b.tagline || '') + '</p><p><b>' + esc(b.name) + '</b>, Travel Advisor with Fora Travel</p>' +
+    return '<footer class="itin-foot"><div class="fb">' + esc(b.brand) + '</div><p>' + esc(b.tagline || '') + '</p><p><b>' + esc(b.name) + '</b>, Independent Travel Advisor with Fora Travel</p>' +
       '<p class="links">' + (b.link && /^https:\/\//.test(b.link) ? '<a href="' + esc(b.link) + '" target="_blank" rel="noopener">' + esc(b.link.replace(/^https?:\/\/(www\.)?/, '')) + '</a>' : '') +
       (b.handle ? '<span>Instagram ' + esc(b.handle) + '</span>' : '') + (b.email ? '<a href="mailto:' + esc(b.email) + '">' + esc(b.email) + '</a>' : '') + (b.phone ? '<a href="tel:' + esc(b.phone) + '">' + esc(b.phone) + '</a>' : '') + '</p>' +
       '<p class="tiny">' + esc(b.brand || 'Booked by Castleberry') + ' is an independent travel advisor affiliated with Fora Travel, Inc.</p></footer>';
@@ -74,7 +74,7 @@
     var p = r.payload || {}, b = p.b || {}, opts = p.options || [];
     var chosen = r.chosen_option;
     var h = '<article class="itin cmp"><header class="itin-hero"><div class="hero-brand">' + esc(b.brand) + '</div><p class="eyebrow">' + opts.length + ' options to compare</p><h1>' + esc(r.title || 'Your trip options') + '</h1>' +
-      (p.summary ? '<p class="hero-sub">' + esc(p.summary) + '</p>' : '') + '<div class="hero-meta"><span>Prepared by ' + esc(b.name || '') + '</span>' + (p.party ? '<span>' + esc(p.party.size) + ' travelers</span>' : '') + '</div></header>';
+      (p.summary ? '<p class="hero-sub">' + esc(p.summary) + '</p>' : '') + '<div class="hero-meta"><span>Prepared by ' + esc(b.name || '') + '</span>' + (p.party ? '<span>' + esc(p.party.size) + ' travelers</span>' : '') + '</div></header>' + (window.TSClientX ? (window.TSClientX.setPayload({ b: b, t: { title: r.title || 'your trip' } }), window.TSClientX.actions({ b: b, t: { title: r.title } })) : '');
     if (chosen) h += '<div class="banner ok">You picked <b>Option ' + esc(chosen) + (r.chosen_label ? ': ' + esc(r.chosen_label) : '') + '</b>. ' + esc((b.name || 'Your advisor').split(' ')[0]) + ' will be in touch. You can still change your pick below.</div>';
     h += '<div class="cmp-grid">' + opts.map(function (o) {
       var c = o.cruise, t = o.total || {}, tr = o.travel || {};

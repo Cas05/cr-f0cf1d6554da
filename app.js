@@ -60,6 +60,9 @@
     if (parts[0] === 'goals' && window.TSGoals) { nav('goals'); return window.TSGoals.render(); }
     if (parts[0] === 'settings') { nav('settings'); if (safe()) return safeBlocked('My rates'); return renderSettings(); }
     if (parts[0] === 'help') { nav('help'); return renderHelp(); }
+    if (parts[0] === 'clients' && window.TSTools) { nav('clients'); return window.TSTools.renderClients(); }
+    if (parts[0] === 'client' && parts[1] && window.TSTools) { nav('clients'); return window.TSTools.renderClient(parts[1]); }
+    if (parts[0] === 'toolkit' && window.TSTools) { nav('toolkit'); return window.TSTools.renderToolkit(); }
     if (parts[0] === 'requests' && window.TSReq) { nav('requests'); return window.TSReq.renderList(); }
     if (parts[0] === 'request' && parts[1] && window.TSReq) { nav('requests'); return window.TSReq.renderDetail(parts[1]); }
     if (parts[0] === 'trip' && trip(parts[1])) { nav('trips'); return renderTrip(trip(parts[1]), parts[2] || 'details'); }
@@ -74,12 +77,14 @@
     var ph = placeholdersLeft();
     var html = '';
     if (ph) html += '<div class="banner warn"><strong>Start here:</strong> ' + ph + ' rate' + (ph === 1 ? ' is a' : 's are') + ' still a placeholder. Open <a href="#/settings">My rates</a> and enter your real numbers from the Fora portal. Earnings shown until then are examples only.</div>';
-    html += '<div class="head"><h1>Trips</h1><div class="btns"><button class="btn primary" data-act="new-trip">+ New trip</button></div></div>';
-    if (!db.trips.length) html += '<div class="empty card">No trips yet. Tap <b>+ New trip</b> to start.</div>';
+    if (window.TSTools) html = window.TSTools.dashboard() + html;
+    html += '<div class="head"><h2 class="sec-title">Trips</h2><div class="btns"><button class="btn" data-tool="new-from-template">❖ From template</button><button class="btn primary" data-act="new-trip">+ New trip</button></div></div>';
+    if (!db.trips.length) html += '<div class="empty-state card"><div class="es-art" aria-hidden="true">🌊</div><h3>No trips yet</h3><p class="muted">Start from a template, plan one with the instant AI planner, or make a blank trip.</p><div class="btns center"><a class="btn primary" href="#/requests">✦ Plan a trip</a><button class="btn" data-tool="new-from-template">From template</button></div></div>';
     html += '<div class="grid">';
     db.trips.slice().sort(function (a, b) { return (a.startDate || '9') < (b.startDate || '9') ? -1 : 1; }).forEach(function (t) {
       var r = C.calcTrip(t, db.settings), stg = STAGES.find(function (x) { return x[0] === (t.stage || 'planning'); }) || STAGES[0];
-      html += '<article class="card tripcard">' + (t.example ? '<span class="tag ex">Example data</span>' : '') + '<span class="tag stage st-' + stg[0] + '">' + stg[1] + '</span>' +
+      var cimg = t.coverImage && /^https:\/\//.test(t.coverImage) ? t.coverImage : (window.TSClientX ? window.TSClientX.defaultCover(t).replace('w=1600', 'w=700') : '');
+      html += '<article class="card tripcard">' + (cimg ? '<a href="#/trip/' + t.id + '" class="tc-img" style="background-image:url(\'' + esc(cimg).replace(/'/g, '%27') + '\')" aria-hidden="true" tabindex="-1"></a>' : '') + (t.example ? '<span class="tag ex">Example data</span>' : '') + '<span class="tag stage st-' + stg[0] + '">' + stg[1] + '</span>' +
         '<a href="#/trip/' + t.id + '" class="tc-main"><h3>' + esc(t.title || 'Untitled trip') + '</h3>' +
         '<p class="muted">' + esc(t.clients || 'No client yet') + ' · ' + esc(travelersLabel(t)) + '</p>' +
         '<p class="muted">' + esc(range(t)) + (t.destination ? ' · ' + esc(t.destination) : '') + '</p>' +
@@ -109,6 +114,8 @@
         if (replace) db.settings = d.settings;
         var n = 0;
         (d.trips || []).forEach(function (t) { var ex = db.trips.findIndex(function (x) { return x.id === t.id; }); if (ex >= 0) db.trips[ex] = t; else db.trips.push(t); n++; });
+        ['clients', 'reminders', 'templates', 'favorites', 'snippets'].forEach(function (k) { if (!Array.isArray(d[k])) return; db[k] = db[k] || []; d[k].forEach(function (x) { if (x && x.id && !db[k].some(function (y) { return y.id === x.id; })) db[k].push(x); }); });
+        if (d.remDone) db.remDone = Object.assign(db.remDone || {}, d.remDone);
         (d.requests || []).forEach(function (q) { if (q && q.id && !db.requests.some(function (x) { return x.id === q.id; })) db.requests.push(q); });
         save(true); toast('Imported ' + n + ' trip' + (n === 1 ? '' : 's')); route();
       } catch (e) { alert('That file does not look like a Trip Studio backup.'); }
@@ -162,7 +169,7 @@
   var TABS = [['details', 'Details'], ['bookings', 'Bookings & pricing'], ['days', 'Day by day'], ['preview', 'Client itinerary'], ['earnings', 'My earnings']];
   function renderTrip(t, tab) {
     app.dataset.trip = t.id;
-    var html = '<div class="head trip-head"><div><a href="#/" class="back">← All trips</a><h1>' + esc(t.title || 'Untitled trip') + '</h1>' + (t.example ? '<span class="tag ex">Example data. Rates are placeholders.</span>' : '') + '</div></div>' +
+    var html = '<div class="head trip-head"><div><a href="#/" class="back">← All trips</a><h1>' + esc(t.title || 'Untitled trip') + '</h1>' + (t.example ? '<span class="tag ex">Example data. Rates are placeholders.</span>' : '') + '</div><div class="btns no-print"><button class="btn sm" data-act="dup-trip" data-id="' + t.id + '">Duplicate</button><button class="btn sm" data-tool="save-template">❖ Save as template</button></div></div>' +
       '<nav class="tabs no-print" role="tablist">' + TABS.map(function (x) { return '<a role="tab" href="#/trip/' + t.id + '/' + x[0] + '" class="' + (x[0] === tab ? 'on' : '') + '">' + x[1] + '</a>'; }).join('') + '</nav>';
     if (tab === 'preview') { app.innerHTML = '<div class="no-print">' + html + previewBar(t) + '</div>' + clientDoc(clientPayload(t)); document.body.classList.add('client-mode'); if (window.TSProp) window.TSProp.tripLinksPanel(t); return; }
     if (tab === 'earnings') { if (safe()) { app.innerHTML = html; app.insertAdjacentHTML('beforeend', '<div class="card empty">My earnings is hidden in client-safe mode.</div>'); return; } app.innerHTML = html + earningsView(t); return; }
@@ -185,7 +192,9 @@
       field('Planning fee ($)', '<input type="number" inputmode="decimal" min="0" data-t="planningFee" value="' + esc(t.planningFee) + '">', 'Added to the client total. Leave at 0 if you aren’t charging one.') +
       field('Welcome note to client', '<textarea rows="3" data-t="welcome" placeholder="A warm hello at the top of the itinerary">' + esc(t.welcome) + '</textarea>') +
       field('Important notes for client', '<textarea rows="3" data-t="clientNotes" placeholder="Passports, payment due dates, cancellation terms…">' + esc(t.clientNotes) + '</textarea>') +
-      field('Cover photo URL (optional)', '<input type="url" data-t="coverImage" value="' + esc(t.coverImage) + '" placeholder="https://…">', 'Paste a link to a photo you have rights to use. Leave blank for the default design.') +
+      '<div class="two">' + field('Final payment due', '<input type="date" data-t="finalPaymentDue" value="' + esc(t.finalPaymentDue || '') + '">', 'Shows on the client checklist, calendar file and your reminders.') + field('Online check-in date', '<input type="date" data-t="checkinDate" value="' + esc(t.checkinDate || '') + '">') + '</div>' +
+      (window.TSTools ? window.TSTools.clientPicker(t) : '') +
+      field('Cover photo URL (optional)', '<input type="url" data-t="coverImage" value="' + esc(t.coverImage) + '" placeholder="https://…">', 'Paste a link to a photo you have rights to use. Leave blank for a matching free Unsplash photo.') +
       '<label class="check"><input type="checkbox" data-t="showItemPrices"' + (t.showItemPrices !== false ? ' checked' : '') + '> Show each booking’s price on the client itinerary (otherwise only the total)</label>' +
       '</div></section>' + trackingForm(t) + '<div class="btns"><a class="btn primary" href="#/trip/' + t.id + '/bookings">Next: bookings →</a></div>';
   }
@@ -231,7 +240,7 @@
   function bookingsForm(t) {
     return '<p class="muted">Add each piece of the trip. Put the base fare or room rate in <b>Base cost</b> and taxes, port fees and gratuities in <b>Taxes / fees</b>. A blank price means “not yet priced”, never $0. For IVF trips, add clinic appointments as “Clinic appointment”. They stay off client links and out of the total.<span class="private"> They don’t earn commission. * = placeholder rate.</span></p>' +
       '<div id="items">' + (t.items || []).map(function (it) { return itemRow(it, t); }).join('') + '</div>' +
-      '<div class="btns addbar">' + ['Cruise', 'Flights', 'Hotel', 'Transfers', 'Excursion', 'Insurance', 'Clinic appointment', 'Other'].map(function (c) { return '<button class="btn sm" data-act="add-item" data-cat="' + c + '">+ ' + c + '</button>'; }).join('') + '</div>';
+      '<div class="btns addbar">' + ['Cruise', 'Flights', 'Hotel', 'Transfers', 'Excursion', 'Insurance', 'Clinic appointment', 'Other'].map(function (c) { return '<button class="btn sm" data-act="add-item" data-cat="' + c + '">+ ' + c + '</button>'; }).join('') + '<button class="btn sm" data-tool="fav-pick">★ Favorites</button></div>';
   }
   function daysForm(t) {
     return '<div class="btns"><button class="btn" data-act="gen-days">Fill in days from trip dates</button><button class="btn primary" data-act="add-day">+ Add day</button></div>' +
@@ -287,7 +296,7 @@
     return {
       v: 1,
       b: { brand: s.brand, name: s.advisorName, link: s.advisorLink, handle: s.handle, email: s.email, phone: s.phone, tagline: s.tagline },
-      t: { title: t.title, clients: t.clients, adults: t.adults, children: t.children, destination: t.destination, startDate: t.startDate, endDate: t.endDate, tripType: t.tripType, welcome: t.welcome, clientNotes: t.clientNotes, coverImage: t.coverImage, example: !!t.example, showItemPrices: t.showItemPrices !== false,
+      t: { title: t.title, clients: t.clients, adults: t.adults, children: t.children, destination: t.destination, startDate: t.startDate, endDate: t.endDate, tripType: t.tripType, welcome: t.welcome, clientNotes: t.clientNotes, coverImage: t.coverImage, finalPaymentDue: t.finalPaymentDue || '', checkinDate: t.checkinDate || '', example: !!t.example, showItemPrices: t.showItemPrices !== false,
         days: (t.days || []).map(function (d) { return { date: d.date, title: d.title, location: d.location, body: d.body }; }),
         items: (t.items || []).map(function (it, i) { var l = r.lines[i]; return { category: it.category, description: it.description, date: it.date, confirmation: it.confirmation, price: l.priced ? l.clientPrice : null, taxesPending: l.taxesMissing, included: l.included }; }) },
       tot: { clientTotal: r.clientTotal, perPerson: r.complete ? r.perPerson : null, travelers: r.travelers, planningFee: r.planningFee, taxes: r.taxes, complete: r.complete, pending: r.unpriced.map(function (u) { return u.what === 'taxes' ? u.category.toLowerCase() + ' taxes' : u.category.toLowerCase(); }), includes: C.componentsLabel(r.components), asOf: t.priceAsOf || '' }
@@ -297,13 +306,15 @@
     var t = p.t, b = p.b, tot = p.tot;
     var n = nights(t);
     var icons = { Cruise: '⚓', Flights: '✈', Hotel: '🏨', Resort: '🌴', Transfers: '🚐', Excursion: '🧭', Tour: '🗺', Insurance: '🛡', Dining: '🍽', 'Clinic appointment': '🩺', Other: '✦' };
-    var cover = t.coverImage && /^https:\/\//.test(t.coverImage) ? ' style="background-image:linear-gradient(rgba(20,40,55,.35),rgba(20,40,55,.65)),url(\'' + esc(t.coverImage).replace(/'/g, '%27') + '\')"' : '';
+    var X = window.TSClientX; if (X) X.setPayload(p);
+    var img = t.coverImage && /^https:\/\//.test(t.coverImage) ? t.coverImage : (X ? X.defaultCover(t) : '');
+    var cover = img ? ' style="background-image:linear-gradient(180deg,rgba(10,30,45,.25),rgba(10,30,45,.78)),url(\'' + esc(img).replace(/'/g, '%27') + '\')"' : '';
     var h = '<article class="itin">' +
       (t.example ? '<div class="ex-ribbon">Example itinerary · sample data</div>' : '') +
       '<header class="itin-hero' + (cover ? ' photo' : '') + '"' + cover + '><div class="hero-brand">' + esc(b.brand) + '</div>' +
       '<p class="eyebrow">' + esc(t.tripType || 'Itinerary') + (n ? ' · ' + n + ' night' + (n === 1 ? '' : 's') : '') + '</p>' +
       '<h1>' + esc(t.title) + '</h1><p class="hero-sub">' + esc(t.destination) + '</p>' +
-      '<div class="hero-meta"><span>' + esc(range(t)) + '</span><span>Prepared for ' + esc(t.clients || 'you') + '</span><span>' + esc(travelersLabel(t)) + '</span></div></header>';
+      '<div class="hero-meta"><span>' + esc(range(t)) + '</span><span>Prepared for ' + esc(t.clients || 'you') + '</span><span>' + esc(travelersLabel(t)) + '</span></div>' + (X ? X.countdown(t) : '') + '</header>' + (X ? X.actions(p) : '');
     if (t.welcome) h += '<section class="itin-sec welcome"><p>' + esc(t.welcome) + '</p><p class="sig">— ' + esc(b.name) + '</p></section>';
     var booked = t.items.filter(function (i) { return i.category !== 'Clinic appointment'; });
     var clinic = t.items.filter(function (i) { return i.category === 'Clinic appointment'; });
@@ -314,6 +325,7 @@
           (t.showItemPrices && i.included ? '<span class="pr">' + (i.price == null ? '<small>To be confirmed</small>' : money(i.price) + (i.taxesPending ? '<small> + taxes TBC</small>' : '')) + '</span>' : '') + '</li>';
       }).join('') + '</ul></section>';
     }
+    if (X) h += X.included(t);
     if (clinic.length) h += '<section class="itin-sec note"><h2>Appointment planning notes</h2><ul class="glance">' + clinic.map(function (i) { return '<li><span class="ico">🩺</span><div><b>' + esc(i.description) + '</b><small>' + esc(fday(i.date)) + '</small></div></li>'; }).join('') + '</ul><p class="tiny">Shown for travel planning only. Appointments are arranged and paid directly with your clinic. Always follow your clinic’s instructions.</p></section>';
     if (t.days.length) {
       h += '<section class="itin-sec"><h2>Day by day</h2><ol class="days">' + t.days.map(function (d, i) {
@@ -325,9 +337,10 @@
     h += '<section class="itin-sec price"><h2>Trip investment</h2><div class="pbox"><div><small>' + (done ? 'Total' : 'Estimated so far') + '</small><b>' + (done ? '' : 'From ') + money(tot.clientTotal) + '</b></div><div><small>Per traveler (' + tot.travelers + ')</small><b>' + (done && tot.perPerson != null ? money(tot.perPerson) : '<small>once fully priced</small>') + '</b></div></div>' +
       (done ? '' : '<p class="tiny warnline">Still being priced: ' + esc(pend.join(', ')) + '.</p>') +
       '<p class="tiny">' + (tot.includes ? 'Includes ' + esc(tot.includes) : 'Includes the bookings above') + (done ? ', with taxes and fees' : '') + (tot.planningFee ? ' and a ' + money(tot.planningFee) + ' planning fee' : '') + '. ' + (tot.asOf ? 'Estimate as of ' + esc(fdate(tot.asOf)) + '. ' : '') + 'Prices are subject to availability until booked and confirmed.</p></section>';
+    if (X && t.startDate) h += X.prep(t);
     var gtk = t.goodToKnow || t.clientNotes;
     if (gtk) h += '<section class="itin-sec"><h2>Good to know</h2><p>' + esc(gtk).replace(/\n/g, '<br>') + '</p></section>';
-    h += '<footer class="itin-foot"><div class="fb">' + esc(b.brand) + '</div><p>' + esc(b.tagline) + '</p><p><b>' + esc(b.name) + '</b>, Travel Advisor with Fora Travel</p>' +
+    h += '<footer class="itin-foot"><div class="fb">' + esc(b.brand) + '</div><p>' + esc(b.tagline) + '</p><p><b>' + esc(b.name) + '</b>, Independent Travel Advisor with Fora Travel</p>' +
       '<p class="links">' + (b.link ? '<a href="' + esc(b.link) + '" target="_blank" rel="noopener">' + esc(b.link.replace(/^https?:\/\/(www\.)?/, '')) + '</a>' : '') +
       (b.handle ? '<span>Instagram ' + esc(b.handle) + '</span>' : '') + (b.email ? '<a href="mailto:' + esc(b.email) + '">' + esc(b.email) + '</a>' : '') + (b.phone ? '<a href="tel:' + esc(b.phone) + '">' + esc(b.phone) + '</a>' : '') + '</p><p class="tiny">' + esc(b.brand || 'Booked by Castleberry') + ' is an independent travel advisor affiliated with Fora Travel, Inc.</p></footer></article>';
     return h;
@@ -358,6 +371,8 @@
       '<li><b>Send it.</b> Client itinerary → Print / Save as PDF, or <i>Create client link</i>. A short checklist comes up first (re-priced in Fora, taxes and fees, affiliation line, no private links). Commission never appears there.</li>' +
       '<li><b>Sign in</b> on the Requests tab to see requests, leads and client links. They are stored on the server and only your account can read them.</li>' +
       '<li><b>Ask ' + (safe() ? 'for research' : 'Jarvis to research a trip') + '.</b> Open <a href="#/requests">Requests</a>, type what the client wants in plain English and tap Send. 2–3 packages come back. Totals say “From $X + N items not yet priced” until everything has a price. Tap <i>Create client comparison link</i> to send the options side by side. The client taps “Choose this one”, and the request shows “Client chose Option X”.</li>' +
+      '<li><b>Instant planner (new).</b> On <a href="#/requests">Requests</a>, type the trip in plain English and tap <i>Make plan now</i>. In about 20 seconds you get a draft: ship or resort, day by day, excursions (cruise line vs private), a rough price range (an estimate, not live pricing), flight routes and questions to ask. Edit it, regenerate it, save it, open it in the trip builder, or tap <i>' + (safe() ? 'Get live flights &amp; prices' : 'Get real flights &amp; prices from Jarvis') + '</i> for real fares. Don’t type client full names, emails or phone numbers there.</li>' +
+      '<li><b>Clients &amp; Toolkit (new).</b> <a href="#/clients">Clients</a> keeps birthdays, anniversaries, preferences and trip history. <a href="#/toolkit">Toolkit</a> has reminders (final payments, check-ins, follow-ups), copy-ready messages, trip templates and favorite excursions. Press <kbd>Ctrl/⌘ K</kbd> or <kbd>/</kbd> to search anything, and <kbd>?</kbd> for shortcuts.</li>' +
       '<li><b>Leads.</b> Put your <i>Plan my trip</i> form link (' + esc(location.href.split('#')[0]) + '#/plan-my-trip) in your Instagram bio and Fora profile. New leads show under <a href="#/leads">Leads</a>. One tap turns a lead into a trip request.</li>' +
       '<li><b>Goals.</b> Set each trip’s status on its Details tab (quote sent, booked, traveled, paid). <a href="#/goals">Goals</a> tracks your client goal, conversion and commission by payout month.</li>' +
       '<li><b>Client-safe mode</b> (🛡 button at the top) hides commission and internal labels everywhere, for when a client is looking at your screen.</li>' +
@@ -404,7 +419,7 @@
       case 'new-trip': return newTrip();
       case 'dup-trip': var src = trip(tid), c = clone(src); c.id = uid('t'); c.title = (src.title || 'Trip') + ' (copy)'; delete c.example; c.items.forEach(function (i) { i.id = uid('i'); }); db.trips.push(c); save(true); toast('Duplicated'); return route();
       case 'del-trip': if (confirm('Delete "' + trip(tid).title + '"? This cannot be undone.')) { db.trips = db.trips.filter(function (x) { return x.id !== tid; }); save(true); route(); } return;
-      case 'export': download('trip-studio-backup-' + iso(new Date()) + '.json', JSON.stringify({ app: 'Booked by Castleberry Trip Studio', exported: new Date().toISOString(), settings: db.settings, trips: db.trips, requests: (db.requests || []).map(function (q) { return { id: q.id, created: q.created, text: q.text, client: q.client }; }) }, null, 2)); return toast('Backup downloaded');
+      case 'export': download('trip-studio-backup-' + iso(new Date()) + '.json', JSON.stringify({ app: 'Booked by Castleberry Trip Studio', exported: new Date().toISOString(), settings: db.settings, trips: db.trips, clients: db.clients || [], reminders: db.reminders || [], templates: db.templates || [], favorites: db.favorites || [], snippets: db.snippets || [], remDone: db.remDone || {}, requests: (db.requests || []).map(function (q) { return { id: q.id, created: q.created, text: q.text, client: q.client }; }) }, null, 2)); return toast('Backup downloaded');
       case 'export-trip': download((t.title || 'trip').replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.json', JSON.stringify({ trip: t }, null, 2)); return;
       case 'add-samples': clone(SAMPLE.trips).forEach(function (s) { if (!trip(s.id)) db.trips.push(s); }); save(true); toast('Example trips added'); return route();
       case 'clear-examples': if (confirm('Remove the example trips?')) { db.trips = db.trips.filter(function (x) { return !x.example; }); save(true); route(); } return;

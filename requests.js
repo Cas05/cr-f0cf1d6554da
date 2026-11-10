@@ -11,7 +11,7 @@
   function STATUS(st) {
     var cs = S() && S().clientSafe();
     var sent = cs ? 'Sent for research' : 'Sent to Jarvis';
-    return ({ 'new': [sent, 'st-new'], researching: [cs ? 'Researching' : 'Jarvis is researching', 'st-res'], ready: ['Options ready', 'st-ready'], error: ['Needs attention', 'st-err'] })[st] || [sent, 'st-new'];
+    return ({ 'new': [sent, 'st-new'], researching: [cs ? 'Researching' : 'Jarvis is researching', 'st-res'], ready: ['Options ready', 'st-ready'], error: ['Needs attention', 'st-err'], draft: ['AI plan · not sent', 'st-draft'] })[st] || [sent, 'st-new'];
   }
   function T() { return window.TS; }
   function S() { return window.TSSafe; }
@@ -36,7 +36,7 @@
       d.requests = (rows || []).map(function (r) {
         var q = old[r.id] || { id: r.id };
         q.created = r.created_at; q.updated = r.updated_at; q.status = r.status; q.text = r.request_text; q.client = r.client_name || '';
-        q.choice = r.choice || null; q.proposalsSent = r.proposals_sent || 0; q.hasBundle = !!r.has_bundle; q.lead_id = r.lead_id || null;
+        q.choice = r.choice || null; q.proposalsSent = r.proposals_sent || 0; q.hasBundle = !!r.has_bundle; q.lead_id = r.lead_id || null; q.hasPlan = !!r.has_ai_plan; q.aiTitle = r.ai_title || '';
         return q;
       });
       T().save(true); return d.requests;
@@ -46,7 +46,7 @@
     return rpc('get_trip_request', { p_id: id }).then(function (r) {
       if (!r) throw new Error('Request not found');
       var q = localReq(id) || remember(id, r.request_text, r.client_name);
-      q.status = r.status; q.updated = r.updated_at; q.notes = r.notes; q.text = r.request_text; q.client = r.client_name || q.client; q.lead_id = r.lead_id || null;
+      q.status = r.status; q.updated = r.updated_at; q.notes = r.notes; q.text = r.request_text; q.client = r.client_name || q.client; q.lead_id = r.lead_id || null; q.ai_plan = r.ai_plan || null; q.origin = r.origin || ''; q.hasPlan = !!r.ai_plan;
       q.bundle = r.bundles && r.bundles[0] ? r.bundles[0] : null;
       q.proposals = r.proposals || [];
       var ch = q.proposals.filter(function (p) { return p.chosen_at; }).sort(function (a, b) { return a.chosen_at < b.chosen_at ? 1 : -1; })[0];
@@ -66,28 +66,20 @@
     var app = T().app;
     delete app.dataset.trip; delete app.dataset.req;
     var pre = null; try { pre = JSON.parse(sessionStorage.getItem('ts_req_prefill') || 'null'); } catch (e) { }
-    var html = '<div class="head"><h1>Trip requests</h1></div>' +
-      '<section class="card newreq"><h2>New request</h2>' +
-      '<p class="muted">Describe the trip the way the client told you. Who, how many, when, where from, must-dos, budget. ' + (S() && S().clientSafe() ? 'Research finds' : 'Jarvis finds') + ' cruises, flights and excursions and sends back 2–3 packages you can compare and send.</p>' +
-      '<label class="field"><span class="lbl">What does the client want?</span><textarea id="rq-text" rows="6" maxlength="4000" placeholder="' + esc(EXAMPLE) + '"></textarea></label>' +
-      '<div class="two"><label class="field"><span class="lbl">Client name (optional)</span><input id="rq-client" maxlength="200" placeholder="e.g., The Smith family"></label>' +
-      '<label class="field"><span class="lbl">Traveling from (optional)</span><input id="rq-origin" maxlength="200" placeholder="e.g., Little Rock, AR"></label></div>' +
-      '<p class="tiny muted">Travel details only. Don’t include medical details, diagnoses or records.</p>' +
-      '<div class="btns"><button class="btn primary" data-ract="submit">' + sendLabel() + '</button><button class="btn sm" data-ract="use-example">Use the example</button></div>' +
-      '<p class="tiny muted" id="rq-msg">Options usually come back within a few hours during the day.</p></section>';
+    var html = '<div class="page-hero ph-plan"><div><p class="eyebrow">Requests</p><h1>Plan &amp; research</h1><p>Instant AI drafts, then live flights and prices when you’re ready.</p></div></div>' +
+      window.TSPlanner.composer(pre ? { text: pre.text, client: pre.client, origin: pre.origin } : null);
     html += '<section class="card"><div class="head sm"><h2>My requests</h2><button class="btn sm" data-ract="refresh">↻ Check now</button></div><div id="rq-list">' + listHtml() + '</div>' +
       '<p class="tiny muted">Checks for updates every minute while this page is open.</p></section>';
     app.innerHTML = html;
-    if (pre && pre.text) { document.getElementById('rq-text').value = pre.text; document.getElementById('rq-client').value = pre.client || ''; document.getElementById('rq-origin').value = pre.origin || ''; }
-    var tick = function () { refreshList().then(function () { var el = document.getElementById('rq-list'); if (el && location.hash.indexOf('#/requests') === 0) el.innerHTML = listHtml(); }).catch(function (e) { var el = document.getElementById('rq-list'); if (el) el.innerHTML = '<p class="warnline">Could not load requests: ' + esc(e.message) + '</p>'; }); };
+        var tick = function () { refreshList().then(function () { var el = document.getElementById('rq-list'); if (el && location.hash.indexOf('#/requests') === 0) el.innerHTML = listHtml(); }).catch(function (e) { var el = document.getElementById('rq-list'); if (el) el.innerHTML = '<p class="warnline">Could not load requests: ' + esc(e.message) + '</p>'; }); };
     tick(); startPoll(tick);
   }
   function listHtml() {
     var reqs = db().requests || [];
-    if (!reqs.length) return '<p class="muted">No requests yet.</p>';
+    if (!reqs.length) return '<div class="empty-state"><div class="es-art" aria-hidden="true">🧳</div><h3>No requests yet</h3><p class="muted">Type a trip above and tap <b>Make plan now</b>. Saved plans and research requests show up here.</p></div>';
     return '<ul class="rlist">' + reqs.map(function (q) {
       return '<li><a href="#/request/' + q.id + '"><div class="rl-top">' + badge(q.status) + chosenBadge(q.choice) + (q.proposalsSent ? '<span class="tag">' + q.proposalsSent + ' link' + (q.proposalsSent === 1 ? '' : 's') + ' sent</span>' : '') + '<small class="muted">' + esc(ago(q.created)) + '</small></div>' +
-        '<b>' + esc(q.client || 'Trip request') + '</b><span class="rl-text">' + esc((q.text || '').slice(0, 160)) + ((q.text || '').length > 160 ? '…' : '') + '</span></a></li>';
+        '<b>' + esc(q.client || q.aiTitle || 'Trip request') + (q.hasPlan ? ' <span class="tag ai">✦ AI plan</span>' : '') + '</b><span class="rl-text">' + esc((q.text || '').slice(0, 160)) + ((q.text || '').length > 160 ? '…' : '') + '</span></a></li>';
     }).join('') + '</ul>';
   }
   function submit(btn) {
@@ -100,7 +92,7 @@
     btn.disabled = true; btn.textContent = 'Sending…';
     rpc('submit_trip_request', { p_request_text: text, p_client_name: client || null, p_party_size: m ? Math.min(200, +m[1]) : null, p_origin: origin || null, p_lead_id: pre && pre.leadId || null })
       .then(function (id) { sessionStorage.removeItem('ts_req_prefill'); remember(id, text, client); T().toast('Sent'); location.hash = '#/request/' + id; })
-      .catch(function (e) { btn.disabled = false; btn.textContent = sendLabel(); if (e.needLogin) return T().route(); alert('Could not send: ' + e.message + '\n\nCheck your connection and try again.'); });
+      .catch(function (e) { btn.disabled = false; btn.textContent = window.TSPlanner ? window.TSPlanner.jarvisLabel() : sendLabel(); if (e.needLogin) return T().route(); alert('Could not send: ' + e.message + '\n\nCheck your connection and try again.'); });
   }
 
   /* ---------- detail + bundle view ---------- */
@@ -115,11 +107,12 @@
         fetchOne(id).then(function (r) { if (location.hash.indexOf(id) > -1) paintDetail(r, id, false); })
           .catch(function (e) { if (e.needLogin) return T().route(); if (!localReq(id) || !localReq(id).bundle) app.innerHTML = '<div class="card empty">Could not load this request (' + esc(e.message) + '). <a href="#/requests">Back</a></div>'; });
       };
-      tick(); startPoll(function () { var cur = localReq(id); if (!cur || cur.status !== 'ready' || (cur.proposals || []).length) tick(); });
+      tick(); startPoll(function () { var cur = localReq(id); if (cur && cur.status === 'draft') return; if (!cur || cur.status !== 'ready' || (cur.proposals || []).length) tick(); });
     });
   }
   function paintDetail(q, id, loading) {
     var app = T().app;
+    if (document.querySelector('#ai-detail [data-pf]') && !loading && app.dataset.req === id) return;   // don't wipe an edit in progress
     var keepOpen = {}; app.querySelectorAll('details[data-k]').forEach(function (d) { keepOpen[d.dataset.k] = d.open; });
     var sy = window.scrollY;
     var h = '<div class="head"><div><a href="#/requests" class="back">← All requests</a><h1>' + esc((q && q.client) || 'Trip request') + '</h1></div></div>';
@@ -127,8 +120,9 @@
     h += '<section class="card"><div class="rl-top">' + badge(q ? q.status : 'new') + (q && q.updated ? '<small class="muted">Updated ' + esc(ago(q.updated)) + '</small>' : '') + '</div>' +
       '<p class="rq-quote">' + esc(q ? q.text : 'Loading…') + '</p>' +
       (q && q.notes && q.status !== 'ready' ? '<p class="muted">' + esc(q.notes) + '</p>' : '') +
-      (q && q.status !== 'ready' ? '<p class="muted">Options usually come back within a few hours during the day. This page checks every minute.</p>' : '') +
+      (q && q.status === 'draft' ? '<p class="muted">Saved instant plan. Not sent for live research yet. Tap “' + esc(window.TSPlanner.jarvisLabel()) + '” when you want real fares and prices.</p>' : (q && q.status !== 'ready' ? '<p class="muted">Options usually come back within a few hours during the day. This page checks every minute.</p>' : '')) +
       '<p class="tiny muted">Request ID: <code>' + esc(id) + '</code></p></section>';
+    if (q && q.ai_plan && window.TSPlanner) h += window.TSPlanner.detailHtml(q);
     if (q && q.bundle && q.bundle.options) h += bundleView(q.bundle.options, q);
     else if (loading) h += '<div class="card empty">Loading…</div>';
     if (q && (q.proposals || []).length && window.TSProp) h += '<section class="card"><h2>Client links</h2>' + window.TSProp.linksHtml(q.proposals) + '</section>';
@@ -367,7 +361,13 @@
   document.addEventListener('click', function (e) {
     var b = e.target.closest('[data-ract]'); if (!b) return;
     var a = b.dataset.ract, id = T().app.dataset.req, q = id ? localReq(id) : null, B = q && q.bundle && q.bundle.options;
-    if (a === 'submit') return submit(b);
+    if (a === 'submit') {
+      var P = window.TSPlanner, pc = P && P.current();
+      if (b.dataset.aiSend && pc && pc.plan) return P.savePlan(true, b);
+      var tx = ((document.getElementById('rq-text') || {}).value || '').trim();
+      if (pc && pc.plan && !pc.requestId && tx && tx === pc.text) return P.savePlan(true, b);
+      return submit(b);
+    }
     if (a === 'use-example') { document.getElementById('rq-text').value = EXAMPLE; document.getElementById('rq-origin').value = 'Little Rock, AR (LIT)'; return; }
     if (a === 'refresh') { b.disabled = true; return refreshList().then(function () { var el = document.getElementById('rq-list'); if (el) el.innerHTML = listHtml(); T().toast('Up to date'); }).catch(function (er) { T().toast('Could not check: ' + er.message); }).then(function () { b.disabled = false; }); }
     if (!B) return;

@@ -103,6 +103,6 @@
       app.innerHTML = loginCard('You are signed in as ' + (sess.email || '') + ', but that email is not on the Trip Studio advisor list. Sign in with the right account or ask Lucas/Jarvis to add it.');
     });
   }
-  window.TSAuth = { rpc: rpc, gate: gate, signIn: signIn, signOut: signOut, consumeHash: consumeHash, accountCard: accountCard, loginCard: loginCard, checkAdvisor: checkAdvisor,
+  window.TSAuth = { rpc: rpc, token: token, gate: gate, signIn: signIn, signOut: signOut, consumeHash: consumeHash, accountCard: accountCard, loginCard: loginCard, checkAdvisor: checkAdvisor,
     signedIn: function () { return !!sess; }, email: function () { return sess && sess.email; } };
 })();

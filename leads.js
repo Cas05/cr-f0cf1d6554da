@@ -30,7 +30,7 @@
       f('Anything else?', '<textarea id="lf-notes" rows="4" maxlength="2000" placeholder="Must-dos, special occasions, cabin or room wishes…"></textarea>', 'Please don’t include medical details, diagnoses or records, or card numbers.') +
       '<div class="hp" aria-hidden="true"><label>Website <input id="lf-website" tabindex="-1" autocomplete="off"></label></div>' +
       '</div><div class="btns"><button class="btn primary" type="submit" id="lf-send">Send my trip idea</button></div><p class="tiny" id="lf-status" role="status"></p></form></section>' +
-      '<footer class="itin-foot"><div class="fb">' + esc(s.brand) + '</div><p>' + esc(s.tagline || '') + '</p><p><b>' + esc(s.advisorName) + '</b>, Travel Advisor with Fora Travel</p><p class="tiny">' + esc(s.brand) + ' is an independent travel advisor affiliated with Fora Travel, Inc. Your details are used only to plan your trip.</p></footer></article>';
+      '<footer class="itin-foot"><div class="fb">' + esc(s.brand) + '</div><p>' + esc(s.tagline || '') + '</p><p><b>' + esc(s.advisorName) + '</b>, Independent Travel Advisor with Fora Travel</p><p class="tiny">' + esc(s.brand) + ' is an independent travel advisor affiliated with Fora Travel, Inc. Your details are used only to plan your trip.</p></footer></article>';
     var tp = document.getElementById('lf-type');
     tp.addEventListener('change', function () { document.getElementById('lf-ivf').hidden = !/IVF/.test(tp.value); });
     document.getElementById('lead-form').addEventListener('submit', function (e) {
