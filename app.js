@@ -39,23 +39,33 @@
   function opts(list, sel) { return list.map(function (v) { return '<option' + (v === sel ? ' selected' : '') + '>' + esc(v) + '</option>'; }).join(''); }
   function travelersLabel(t) { var a = C.num(t.adults), c = C.num(t.children); var s = a + ' adult' + (a === 1 ? '' : 's'); if (c) s += ', ' + c + ' child' + (c === 1 ? '' : 'ren'); return s; }
   function download(name, text) { var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' })); a.download = name; document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500); }
+  function ratesOk() { return !!db.settings.ratesConfirmed && !placeholdersLeft(); }
   function placeholdersLeft() { var s = db.settings; return s.suppliers.filter(function (x) { return x.placeholder; }).length + (s.foraSplitPlaceholder ? 1 : 0) + (s.feeKeepPlaceholder ? 1 : 0); }
 
   /* ---------- router ---------- */
+  var STAGES = [['planning', 'Planning'], ['quoted', 'Quote sent'], ['booked', 'Booked'], ['traveled', 'Traveled'], ['paid', 'Commission paid'], ['lost', 'Lost / not booking']];
+  function safe() { return window.TSSafe && window.TSSafe.clientSafe(); }
   function route() {
+    if (window.TSAuth && window.TSAuth.consumeHash()) { /* magic-link return handled; hash now #/requests */ }
+    if (window.TSSafe) window.TSSafe.applyMode();
     var h = location.hash.replace(/^#\/?/, '');
     var parts = h.split('/');
     document.body.classList.remove('client-mode', 'shared');
     document.getElementById('appbar').style.display = '';
     document.querySelectorAll('[data-nav]').forEach(function (a) { a.classList.remove('on'); });
     if (parts[0] === 'share') return renderShared(parts.slice(1).join('/'));
-    if (parts[0] === 'settings') { nav('settings'); return renderSettings(); }
+    if (parts[0] === 'p' && window.TSProp) return window.TSProp.renderClient(parts[1]);
+    if (parts[0] === 'plan-my-trip' && window.TSLeads) return window.TSLeads.renderForm();
+    if (parts[0] === 'leads' && window.TSLeads) { nav('leads'); return window.TSLeads.renderList(); }
+    if (parts[0] === 'goals' && window.TSGoals) { nav('goals'); return window.TSGoals.render(); }
+    if (parts[0] === 'settings') { nav('settings'); if (safe()) return safeBlocked('My rates'); return renderSettings(); }
     if (parts[0] === 'help') { nav('help'); return renderHelp(); }
     if (parts[0] === 'requests' && window.TSReq) { nav('requests'); return window.TSReq.renderList(); }
     if (parts[0] === 'request' && parts[1] && window.TSReq) { nav('requests'); return window.TSReq.renderDetail(parts[1]); }
     if (parts[0] === 'trip' && trip(parts[1])) { nav('trips'); return renderTrip(trip(parts[1]), parts[2] || 'details'); }
     nav('trips'); renderTrips();
   }
+  function safeBlocked(what) { app.innerHTML = '<div class="card empty"><h2>Client-safe mode is on</h2><p>' + esc(what) + ' is hidden while client-safe mode is on.</p><button class="btn" id="safe-off-inline" onclick="window.TSSafe.toggle()">Turn client-safe mode off</button></div>'; }
   function nav(n) { var a = document.querySelector('[data-nav="' + n + '"]'); if (a) a.classList.add('on'); }
   window.addEventListener('hashchange', function () { save(true); if (window.TSReq) window.TSReq.stopPoll(); route(); window.scrollTo(0, 0); });
 
@@ -68,16 +78,16 @@
     if (!db.trips.length) html += '<div class="empty card">No trips yet. Tap <b>+ New trip</b> to start.</div>';
     html += '<div class="grid">';
     db.trips.slice().sort(function (a, b) { return (a.startDate || '9') < (b.startDate || '9') ? -1 : 1; }).forEach(function (t) {
-      var r = C.calcTrip(t, db.settings);
-      html += '<article class="card tripcard">' + (t.example ? '<span class="tag ex">Example data</span>' : '') +
+      var r = C.calcTrip(t, db.settings), stg = STAGES.find(function (x) { return x[0] === (t.stage || 'planning'); }) || STAGES[0];
+      html += '<article class="card tripcard">' + (t.example ? '<span class="tag ex">Example data</span>' : '') + '<span class="tag stage st-' + stg[0] + '">' + stg[1] + '</span>' +
         '<a href="#/trip/' + t.id + '" class="tc-main"><h3>' + esc(t.title || 'Untitled trip') + '</h3>' +
         '<p class="muted">' + esc(t.clients || 'No client yet') + ' · ' + esc(travelersLabel(t)) + '</p>' +
         '<p class="muted">' + esc(range(t)) + (t.destination ? ' · ' + esc(t.destination) : '') + '</p>' +
-        '<div class="tc-nums"><div><small>Client total</small><b>' + money(r.clientTotal, false) + '</b></div><div><small>Your take-home</small><b class="earn">' + money(r.takeHome, false) + '</b></div></div></a>' +
+        '<div class="tc-nums"><div><small>' + (r.complete ? 'Client total' : 'Known so far') + '</small><b>' + money(r.clientTotal, false) + '</b>' + (r.complete ? '' : '<small class="warnline">+ ' + r.unpricedCount + ' not yet priced</small>') + '</div><div class="private"><small>Est. commission to you (pre-tax)</small><b class="earn">' + money(r.takeHome, false) + '</b>' + (ratesOk() ? '' : '<small class="warnline">placeholder rates</small>') + '</div></div></a>' +
         '<div class="tc-acts"><a class="btn sm" href="#/trip/' + t.id + '/preview">Client view</a><button class="btn sm" data-act="dup-trip" data-id="' + t.id + '">Duplicate</button><button class="btn sm danger" data-act="del-trip" data-id="' + t.id + '">Delete</button></div></article>';
     });
     html += '</div>';
-    html += '<section class="card data"><h2>Backup &amp; data</h2><p class="muted">Trips and rates are saved only in this browser on this device. (Only trip requests you send to Jarvis go to a server.) Export a backup now and then, and use Import to move trips to another phone or computer.</p>' +
+    html += '<section class="card data"><h2>Backup &amp; data</h2><p class="muted">Trips and rates are saved only in this browser on this device. (Trip requests, leads and client links are stored on the server and need you to sign in.) Export a backup now and then, and use Import to move trips to another phone or computer.</p>' +
       '<div class="btns"><button class="btn" data-act="export">Export backup (JSON)</button><label class="btn">Import backup<input type="file" accept=".json,application/json" id="importFile" hidden></label><button class="btn" data-act="add-samples">Re-add example trips</button><button class="btn danger" data-act="clear-examples">Remove example trips</button></div></section>';
     app.innerHTML = html;
     var f = document.getElementById('importFile');
@@ -110,15 +120,22 @@
   function renderSettings() {
     var s = db.settings;
     var ph = function (flag) { return flag ? ' <span class="tag ph">placeholder</span>' : ''; };
-    var html = '<div class="head"><h1>My rates &amp; brand</h1></div>' +
+    var html = '<div class="head"><h1>My rates &amp; brand</h1></div>' + (window.TSAuth ? window.TSAuth.accountCard() : '') +
+      '<section class="card"><h2>Are these your real rates?</h2>' + (s.ratesConfirmed && !placeholdersLeft() ? '<p class="okline">✓ You confirmed these rates' + (s.ratesConfirmedAt ? ' on ' + esc(fdate(s.ratesConfirmedAt)) : '') + '. Earnings are no longer marked as examples.</p><button class="btn sm" data-act="rates-unconfirm">Mark as not confirmed</button>' :
+        '<p class="muted">Every earnings figure shows a “placeholder rates” warning until you confirm. ' + (placeholdersLeft() ? 'First replace the ' + placeholdersLeft() + ' placeholder rate(s) below (or tap “✓ Rate is real”).' : 'All rates are filled in.') + '</p><button class="btn primary" data-act="rates-confirm"' + (placeholdersLeft() ? ' disabled' : '') + '>My rates are confirmed</button>') + '</section>' +
       '<div class="banner info">Copy these from your <b>Fora advisor portal</b> (supplier pages and your plan details). They are stored only on this device. Any rate tagged <span class="tag ph">placeholder</span> is a made-up example. Replace it, or delete suppliers you don’t use.</div>' +
       '<section class="card"><h2>Fora payout</h2><div class="fields">' +
       field('Your share of commission (%)' + ph(s.foraSplitPlaceholder), '<input type="number" inputmode="decimal" step="0.1" min="0" max="100" data-set="foraSplit" value="' + esc(s.foraSplit) + '">', 'Your payout split under your Fora plan. If you keep 70% and Fora keeps 30%, enter 70.') +
       field('Share of planning fees you keep (%)' + ph(s.feeKeepPlaceholder), '<input type="number" inputmode="decimal" step="0.1" min="0" max="100" data-set="feeKeep" value="' + esc(s.feeKeep) + '">', 'Check Fora’s fee policy. Enter 100 if you keep the whole fee.') +
       field('Default planning fee per trip ($)', '<input type="number" inputmode="decimal" step="1" min="0" data-set="defaultPlanningFee" value="' + esc(s.defaultPlanningFee) + '">', 'Filled in automatically on new trips. You can change it on each trip.') +
+      field('When commission is paid', '<input data-set="payoutTiming" value="' + esc(s.payoutTiming || 'after travel – confirm with Fora') + '">', 'Shown next to earnings. Most suppliers pay after travel; check your Fora plan.') +
       '</div></section>' +
+      '<section class="card"><h2>Client goal</h2><div class="fields"><div class="two">' +
+      field('Goal (unique clients)', '<input type="number" inputmode="numeric" min="1" data-set="goalClients" value="' + esc(s.goalClients || 50) + '">') +
+      field('Over how many days', '<input type="number" inputmode="numeric" min="7" data-set="goalDays" value="' + esc(s.goalDays || 90) + '">') + '</div>' +
+      field('Goal start date', '<input type="date" data-set="goalStart" value="' + esc(s.goalStart || '') + '">', 'Used by the Goals dashboard pace line.') + '</div></section>' +
       '<section class="card"><div class="head sm"><h2>Suppliers &amp; commission rates</h2><button class="btn primary sm" data-act="add-sup">+ Add supplier</button></div>' +
-      '<p class="muted">Commission is earned on the base fare or room rate only. Taxes, port fees and gratuities go in each booking’s “Taxes/fees” box and never earn commission. You can override a rate on any single booking.</p>' +
+      '<p class="muted">Commission is earned on the base fare or room rate only. Taxes, port fees and gratuities go in each booking’s “Taxes/fees” box, and cruise NCF (non-commissionable fare) goes in the NCF box. Neither earns commission. You can override a rate on any single booking.</p>' +
       '<div class="suplist">' + s.suppliers.map(function (x) {
         return '<div class="suprow' + (x.placeholder ? ' isph' : '') + '" data-sid="' + x.id + '">' +
           '<input class="sn" aria-label="Supplier name" data-sup="name" value="' + esc(x.name) + '" placeholder="Supplier name">' +
@@ -147,8 +164,8 @@
     app.dataset.trip = t.id;
     var html = '<div class="head trip-head"><div><a href="#/" class="back">← All trips</a><h1>' + esc(t.title || 'Untitled trip') + '</h1>' + (t.example ? '<span class="tag ex">Example data. Rates are placeholders.</span>' : '') + '</div></div>' +
       '<nav class="tabs no-print" role="tablist">' + TABS.map(function (x) { return '<a role="tab" href="#/trip/' + t.id + '/' + x[0] + '" class="' + (x[0] === tab ? 'on' : '') + '">' + x[1] + '</a>'; }).join('') + '</nav>';
-    if (tab === 'preview') { app.innerHTML = '<div class="no-print">' + html + previewBar(t) + '</div>' + clientDoc(clientPayload(t)); document.body.classList.add('client-mode'); return; }
-    if (tab === 'earnings') { app.innerHTML = html + earningsView(t); return; }
+    if (tab === 'preview') { app.innerHTML = '<div class="no-print">' + html + previewBar(t) + '</div>' + clientDoc(clientPayload(t)); document.body.classList.add('client-mode'); if (window.TSProp) window.TSProp.tripLinksPanel(t); return; }
+    if (tab === 'earnings') { if (safe()) { app.innerHTML = html; app.insertAdjacentHTML('beforeend', '<div class="card empty">My earnings is hidden in client-safe mode.</div>'); return; } app.innerHTML = html + earningsView(t); return; }
     html += '<div class="split"><div class="main-col">';
     if (tab === 'details') html += detailsForm(t);
     else if (tab === 'bookings') html += bookingsForm(t);
@@ -170,33 +187,49 @@
       field('Important notes for client', '<textarea rows="3" data-t="clientNotes" placeholder="Passports, payment due dates, cancellation terms…">' + esc(t.clientNotes) + '</textarea>') +
       field('Cover photo URL (optional)', '<input type="url" data-t="coverImage" value="' + esc(t.coverImage) + '" placeholder="https://…">', 'Paste a link to a photo you have rights to use. Leave blank for the default design.') +
       '<label class="check"><input type="checkbox" data-t="showItemPrices"' + (t.showItemPrices !== false ? ' checked' : '') + '> Show each booking’s price on the client itinerary (otherwise only the total)</label>' +
-      '</div></section><div class="btns"><a class="btn primary" href="#/trip/' + t.id + '/bookings">Next: bookings →</a></div>';
+      '</div></section>' + trackingForm(t) + '<div class="btns"><a class="btn primary" href="#/trip/' + t.id + '/bookings">Next: bookings →</a></div>';
   }
+  function trackingForm(t) {
+    return '<section class="card private"><h2>Status &amp; goal tracking</h2><p class="tiny muted">For you only. Feeds the Goals dashboard.</p><div class="fields">' +
+      field('Status', '<select data-t="stage">' + STAGES.map(function (x) { return '<option value="' + x[0] + '"' + ((t.stage || 'planning') === x[0] ? ' selected' : '') + '>' + x[1] + '</option>'; }).join('') + '</select>') +
+      '<div class="two">' + field('Quote sent on', '<input type="date" data-t="quotedAt" value="' + esc(t.quotedAt || '') + '">') + field('Booked on', '<input type="date" data-t="bookedAt" value="' + esc(t.bookedAt || '') + '">') + '</div>' +
+      '<div class="two">' + field('Expected payout month', '<input type="month" data-t="payoutMonth" value="' + esc(t.payoutMonth || '') + '" placeholder="' + esc(defaultPayoutMonth(t)) + '">', 'Blank = month after travel (' + esc(defaultPayoutMonth(t) || 'set trip dates') + ')') +
+      field('Lead source', '<input data-t="leadSource" list="srcs" value="' + esc(t.leadSource || '') + '" placeholder="Instagram, referral, Fora profile…"><datalist id="srcs"><option>Instagram</option><option>Fora profile</option><option>Referral</option><option>Facebook</option><option>Friend / family</option><option>Repeat client</option></datalist>') + '</div>' +
+      '<div class="two">' + field('Commission received ($)', '<input type="number" inputmode="decimal" min="0" step="0.01" data-t="commissionReceived" value="' + esc(t.commissionReceived == null ? '' : t.commissionReceived) + '">') + field('Received in (month)', '<input type="month" data-t="paidMonth" value="' + esc(t.paidMonth || '') + '">') + '</div>' +
+      field('Hours spent on this trip', '<input type="number" inputmode="decimal" min="0" step="0.25" data-t="hoursSpent" value="' + esc(t.hoursSpent == null ? '' : t.hoursSpent) + '">', 'Rough is fine. Used for your $ per hour.') +
+      '</div></section>';
+  }
+  function defaultPayoutMonth(t) { var d = pd(t.endDate || t.startDate); if (!d) return ''; d.setMonth(d.getMonth() + 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
   function supOpts(sel) {
-    return '<option value="">No supplier</option>' + db.settings.suppliers.map(function (s) { return '<option value="' + s.id + '"' + (s.id === sel ? ' selected' : '') + '>' + esc(s.name) + ' (' + esc(s.commission) + '%' + (s.placeholder ? '*' : '') + ')</option>'; }).join('');
+    return '<option value="">No supplier</option>' + db.settings.suppliers.map(function (s) { return '<option value="' + s.id + '"' + (s.id === sel ? ' selected' : '') + '>' + esc(s.name) + (safe() ? '' : ' (' + esc(s.commission) + '%' + (s.placeholder ? '*' : '') + ')') + '</option>'; }).join('');
   }
   function itemRow(it, t) {
     var l = C.calcItem(it, db.settings);
-    var s = supplier(it.supplierId);
-    return '<div class="item card" data-iid="' + it.id + '">' +
+    var s = supplier(it.supplierId), taxed = /^(Cruise|Hotel|Resort)$/.test(it.category);
+    return '<div class="item card' + (l.priced ? '' : ' unpriced') + '" data-iid="' + it.id + '">' +
       '<div class="item-top"><select data-i="category" aria-label="Category">' + opts(CATS, it.category) + '</select>' +
-      '<div class="item-out"><span>Client <b data-out="price">' + money(l.clientPrice) + '</b></span><span class="earn">Comm. <b data-out="comm">' + money(l.gross) + '</b> <small data-out="rate">(' + l.rate + '%)</small></span></div></div>' +
+      '<div class="item-out"><span>Client <b data-out="price">' + priceOut(l) + '</b></span><span class="earn private">Comm. <b data-out="comm">' + money(l.gross) + '</b> <small data-out="rate">(' + l.rate + '%' + (l.hold ? ', on hold' : '') + ')</small></span></div></div>' +
       '<input class="desc" data-i="description" value="' + esc(it.description) + '" placeholder="What is it? Shown to the client (e.g., 7-night cruise, balcony cabin)">' +
       '<div class="item-grid">' +
       field('Supplier', '<select data-i="supplierId">' + supOpts(it.supplierId) + '</select>') +
       field('Date', '<input type="date" data-i="date" value="' + esc(it.date) + '">') +
-      field('Base cost ($)', '<input type="number" inputmode="decimal" step="0.01" min="0" data-i="cost" value="' + esc(it.cost) + '">', 'Earns commission') +
-      field('Taxes / fees ($)', '<input type="number" inputmode="decimal" step="0.01" min="0" data-i="taxes" value="' + esc(it.taxes) + '">', 'No commission') +
-      field('Rate override (%)', '<input type="number" inputmode="decimal" step="0.1" min="0" max="100" data-i="rateOverride" value="' + esc(it.rateOverride == null ? '' : it.rateOverride) + '" placeholder="' + (s ? esc(s.commission) : '0') + '">', 'Blank = supplier rate') +
+      field('Base cost ($)', '<input type="number" inputmode="decimal" step="0.01" min="0" data-i="cost" value="' + esc(it.cost) + '">', '<span class="private">Earns commission. </span>Blank = not yet priced') +
+      field('Taxes / fees ($)', '<input type="number" inputmode="decimal" step="0.01" min="0" data-i="taxes" value="' + esc(it.taxes) + '">', '<span class="private">No commission. </span>' + (taxed ? 'Blank = not yet priced' : '')) +
+      (it.category === 'Cruise' ? '<div class="private">' + field('NCF ($)', '<input type="number" inputmode="decimal" step="0.01" min="0" data-i="ncf" value="' + esc(it.ncf == null ? '' : it.ncf) + '">', 'Non-commissionable fare, part of Base cost. From Fora / the cruise line.') + '</div>' : '') +
+      '<div class="private">' +
+      field('Rate override (%)', '<input type="number" inputmode="decimal" step="0.1" min="0" max="100" data-i="rateOverride" value="' + esc(it.rateOverride == null ? '' : it.rateOverride) + '" placeholder="' + (s ? esc(s.commission) : '0') + '">', 'Blank = supplier rate') + '</div>' +
       field('Confirmation #', '<input data-i="confirmation" value="' + esc(it.confirmation) + '">') +
       '</div>' +
-      '<div class="item-flags"><label class="check"><input type="checkbox" data-i="nonCommissionable"' + (it.nonCommissionable ? ' checked' : '') + '> Non-commissionable</label>' +
+      '<div class="item-flags"><label class="check private"><input type="checkbox" data-i="nonCommissionable"' + (it.nonCommissionable ? ' checked' : '') + '> Non-commissionable</label>' +
+      (taxed ? '<label class="check"><input type="checkbox" data-i="noTaxes"' + (it.noTaxes ? ' checked' : '') + '> Taxes already in Base cost / none</label>' : '') +
+      (it.commissionHold ? '<label class="check warnline private"><input type="checkbox" data-i="commissionHold" checked> Commission on hold: price includes taxes of unknown amount. Split them out, then untick.</label>' : '') +
       '<label class="check"><input type="checkbox" data-i="includeInTotal"' + (it.includeInTotal !== false ? ' checked' : '') + '> Include in client total</label></div>' +
       field('Private notes (never shown to client)', '<input data-i="notes" value="' + esc(it.notes) + '">') +
       '<div class="item-acts"><button class="btn sm" data-act="item-up">↑</button><button class="btn sm" data-act="item-down">↓</button><button class="btn sm" data-act="item-dup">Duplicate</button><button class="btn sm danger" data-act="item-del">Delete</button></div></div>';
   }
+  function priceOut(l) { return l.priced ? money(l.clientPrice) + (l.taxesMissing ? ' <small class="warnline">+ taxes not yet priced</small>' : '') : '<span class="warnline">Not yet priced</span>'; }
   function bookingsForm(t) {
-    return '<p class="muted">Add each piece of the trip. Put the base fare or room rate in <b>Base cost</b> and taxes, port fees and gratuities in <b>Taxes / fees</b>. For IVF trips, add clinic appointments as “Clinic appointment”. They show on the itinerary as planning notes, don’t earn commission, and stay out of the total. * = placeholder rate.</p>' +
+    return '<p class="muted">Add each piece of the trip. Put the base fare or room rate in <b>Base cost</b> and taxes, port fees and gratuities in <b>Taxes / fees</b>. A blank price means “not yet priced”, never $0. For IVF trips, add clinic appointments as “Clinic appointment”. They stay off client links and out of the total.<span class="private"> They don’t earn commission. * = placeholder rate.</span></p>' +
       '<div id="items">' + (t.items || []).map(function (it) { return itemRow(it, t); }).join('') + '</div>' +
       '<div class="btns addbar">' + ['Cruise', 'Flights', 'Hotel', 'Transfers', 'Excursion', 'Insurance', 'Clinic appointment', 'Other'].map(function (c) { return '<button class="btn sm" data-act="add-item" data-cat="' + c + '">+ ' + c + '</button>'; }).join('') + '</div>';
   }
@@ -212,30 +245,39 @@
   }
   function sumBox(t) {
     var r = C.calcTrip(t, db.settings);
+    var comp = C.componentsLabel(r.components);
     return '<h3>Trip math</h3><dl class="sum">' +
       '<dt>Bookings (base)</dt><dd>' + money(r.subtotal) + '</dd>' +
       '<dt>Taxes &amp; fees</dt><dd>' + money(r.taxes) + '</dd>' +
       (r.planningFee ? '<dt>Planning fee</dt><dd>' + money(r.planningFee) + '</dd>' : '') +
-      '<dt class="big">Client total</dt><dd class="big">' + money(r.clientTotal) + '</dd>' +
-      '<dt>Per person (' + r.travelers + ')</dt><dd>' + money(r.perPerson) + '</dd>' +
+      '<dt class="big">' + (r.complete ? 'Client total' : 'Known so far') + '</dt><dd class="big" data-out="total">' + esc(C.totalLabel(r, money)) + '</dd>' +
+      '<dt>Per person (' + r.travelers + ')</dt><dd>' + (r.complete ? money(r.perPerson) : '<span class="muted">— until fully priced</span>') + '</dd>' +
       (r.paidOutside ? '<dt>Paid outside (not in total)</dt><dd>' + money(r.paidOutside) + '</dd>' : '') +
-      '</dl><hr><dl class="sum private">' +
+      '</dl><p class="tiny muted">' + (comp ? 'Includes ' + esc(comp) + '. ' : '') + 'Public web estimate' + (t.priceAsOf ? ' as of ' + esc(fdate(t.priceAsOf)) : '') + ' unless you entered live Fora prices.</p>' +
+      (r.complete ? '' : '<p class="tiny warnline">Not yet priced: ' + esc(r.unpriced.map(function (u) { return (u.what === 'taxes' ? u.category + ' taxes' : u.category) ; }).join(', ')) + '</p><label class="check tiny"><input type="checkbox" data-t="priceOverride"' + (t.priceOverride ? ' checked' : '') + '> Send anyway: the client will see “still being priced”</label>') +
+      '<hr><dl class="sum private">' +
       '<dt>Gross commission</dt><dd>' + money(r.gross) + '</dd>' +
       '<dt>Fora’s share</dt><dd>−' + money(r.foraShare) + '</dd>' +
       (r.feeTakeHome ? '<dt>Planning fee kept</dt><dd>' + money(r.feeTakeHome) + '</dd>' : '') +
-      '<dt class="big">Your take-home</dt><dd class="big earn">' + money(r.takeHome) + '</dd>' +
-      '</dl><p class="tiny muted">Private: never shown on the client itinerary.' + (placeholdersLeft() ? ' Some rates are still placeholders.' : '') + '</p>';
+      '<dt class="big">Est. commission to you (pre-tax)</dt><dd class="big earn">' + money(r.takeHome) + '</dd>' +
+      '</dl><div class="private">' + (window.TSSafe ? window.TSSafe.earnWarn() : '') + (r.holds.length ? '<p class="tiny warnline">Commission on hold for ' + r.holds.length + ' booking(s): taxes are inside the price.</p>' : '') +
+      '<p class="tiny muted">Private: never shown on the client itinerary. Payout: ' + esc(db.settings.payoutTiming || 'after travel – confirm with Fora') + '.</p></div>';
   }
   function earningsView(t) {
     var r = C.calcTrip(t, db.settings);
     var rows = (t.items || []).map(function (it, i) {
       var l = r.lines[i], s = supplier(it.supplierId);
-      return '<tr><td>' + esc(it.category) + '<br><small class="muted">' + esc(it.description) + '</small></td><td>' + esc(s ? s.name : '—') + (s && s.placeholder && !it.nonCommissionable ? ' <span class="tag ph">placeholder</span>' : '') + '</td><td class="r">' + money(l.cost) + '</td><td class="r">' + money(l.taxes) + '</td><td class="r">' + (l.included ? money(l.clientPrice) : '<small>outside</small>') + '</td><td class="r">' + l.rate + '%</td><td class="r earn">' + money(l.gross) + '</td></tr>';
+      return '<tr' + (l.priced ? '' : ' class="unpriced"') + '><td>' + esc(it.category) + '<br><small class="muted">' + esc(it.description) + '</small></td><td>' + esc(s ? s.name : '—') + (s && s.placeholder && !it.nonCommissionable ? ' <span class="tag ph">placeholder</span>' : '') + '</td><td class="r">' + (l.priced ? money(l.cost) : '<span class="warnline">not priced</span>') + '</td><td class="r">' + (l.ncf ? money(l.ncf) : '—') + '</td><td class="r">' + money(l.taxes) + (l.taxesMissing ? '<br><small class="warnline">missing</small>' : '') + '</td><td class="r">' + (l.included ? (l.priced ? money(l.clientPrice) : '—') : '<small>outside</small>') + '</td><td class="r">' + l.rate + '%' + (l.hold ? '<br><small class="warnline">on hold</small>' : '') + '</td><td class="r earn">' + money(l.gross) + '</td></tr>';
     }).join('');
-    return '<div class="banner info">Internal summary, for you only. Don’t send this page to clients.</div>' +
-      '<div class="kpis"><div class="kpi"><small>Client total</small><b>' + money(r.clientTotal) + '</b></div><div class="kpi"><small>Gross commission</small><b>' + money(r.gross) + '</b><small>' + r.effectiveRate + '% effective</small></div><div class="kpi"><small>Fora’s share</small><b>' + money(r.foraShare) + '</b><small>you keep ' + esc(db.settings.foraSplit) + '%</small></div><div class="kpi hi"><small>Your take-home</small><b>' + money(r.takeHome) + '</b>' + (r.feeTakeHome ? '<small>incl. ' + money(r.feeTakeHome) + ' fee</small>' : '') + '</div></div>' +
-      '<div class="card scroll"><table class="tbl"><thead><tr><th>Booking</th><th>Supplier</th><th class="r">Base</th><th class="r">Taxes/fees</th><th class="r">Client price</th><th class="r">Rate</th><th class="r">Commission</th></tr></thead><tbody>' + rows +
-      '</tbody><tfoot><tr><td colspan="2">Totals' + (r.planningFee ? ' (+ ' + money(r.planningFee) + ' planning fee)' : '') + '</td><td class="r">' + money(r.subtotal) + '</td><td class="r">' + money(r.taxes) + '</td><td class="r">' + money(r.clientTotal) + '</td><td></td><td class="r earn">' + money(r.gross) + '</td></tr></tfoot></table></div>' +
+    var cruiseNoNcf = (t.items || []).some(function (it) { return it.category === 'Cruise' && C.blank(it.ncf) && it.includeInTotal !== false; });
+    return '<div class="banner info">Internal summary, for you only. Don’t send this page to clients.</div>' + (window.TSSafe ? window.TSSafe.earnWarn() : '') +
+      (r.complete ? '' : '<div class="banner warn">' + r.unpricedCount + ' item(s) not yet priced. Totals and commission below cover only what is priced.</div>') +
+      '<div class="kpis"><div class="kpi"><small>' + (r.complete ? 'Client total' : 'Known so far') + '</small><b>' + money(r.clientTotal) + '</b></div><div class="kpi"><small>Gross commission</small><b>' + money(r.gross) + '</b><small title="Gross commission ÷ bookings base (taxes, port fees and planning fee excluded)">' + r.effectiveRate + '% of bookings base</small></div><div class="kpi"><small>Fora’s share</small><b>' + money(r.foraShare) + '</b><small>you keep ' + esc(db.settings.foraSplit) + '%</small></div><div class="kpi hi"><small>Est. commission to you (pre-tax)</small><b>' + money(r.takeHome) + '</b>' + (r.feeTakeHome ? '<small>incl. ' + money(r.feeTakeHome) + ' fee</small>' : '') + '<small>Paid ' + esc(db.settings.payoutTiming || 'after travel – confirm with Fora') + '</small></div></div>' +
+      '<p class="tiny muted">“% of bookings base” = gross commission ÷ base cost of all bookings, before taxes, port fees and the planning fee. NCF and non-commissionable bookings pull it down. Your income is before income tax and any Fora fees.</p>' +
+      (cruiseNoNcf ? '<p class="tiny warnline">A cruise has no NCF entered, so commission may be overstated. Add the NCF from Fora on Bookings &amp; pricing.</p>' : '') +
+      (r.holds.length ? '<p class="tiny warnline">Commission on hold for ' + r.holds.length + ' booking(s) whose price includes taxes of unknown amount.</p>' : '') +
+      '<div class="card scroll"><table class="tbl"><thead><tr><th>Booking</th><th>Supplier</th><th class="r">Base</th><th class="r">NCF</th><th class="r">Taxes/fees</th><th class="r">Client price</th><th class="r">Rate</th><th class="r">Commission</th></tr></thead><tbody>' + rows +
+      '</tbody><tfoot><tr><td colspan="2">Totals' + (r.planningFee ? ' (+ ' + money(r.planningFee) + ' planning fee)' : '') + '</td><td class="r">' + money(r.subtotal) + '</td><td class="r">' + (r.ncf ? money(r.ncf) : '—') + '</td><td class="r">' + money(r.taxes) + '</td><td class="r">' + money(r.clientTotal) + '</td><td></td><td class="r earn">' + money(r.gross) + '</td></tr></tfoot></table></div>' +
       '<div class="btns no-print"><button class="btn" onclick="window.print()">Print this summary</button><button class="btn" data-act="export-trip">Export this trip (JSON)</button></div>';
   }
 
@@ -247,8 +289,8 @@
       b: { brand: s.brand, name: s.advisorName, link: s.advisorLink, handle: s.handle, email: s.email, phone: s.phone, tagline: s.tagline },
       t: { title: t.title, clients: t.clients, adults: t.adults, children: t.children, destination: t.destination, startDate: t.startDate, endDate: t.endDate, tripType: t.tripType, welcome: t.welcome, clientNotes: t.clientNotes, coverImage: t.coverImage, example: !!t.example, showItemPrices: t.showItemPrices !== false,
         days: (t.days || []).map(function (d) { return { date: d.date, title: d.title, location: d.location, body: d.body }; }),
-        items: (t.items || []).map(function (it, i) { var l = r.lines[i]; return { category: it.category, description: it.description, date: it.date, confirmation: it.confirmation, price: l.clientPrice, included: l.included }; }) },
-      tot: { clientTotal: r.clientTotal, perPerson: r.perPerson, travelers: r.travelers, planningFee: r.planningFee, taxes: r.taxes }
+        items: (t.items || []).map(function (it, i) { var l = r.lines[i]; return { category: it.category, description: it.description, date: it.date, confirmation: it.confirmation, price: l.priced ? l.clientPrice : null, taxesPending: l.taxesMissing, included: l.included }; }) },
+      tot: { clientTotal: r.clientTotal, perPerson: r.complete ? r.perPerson : null, travelers: r.travelers, planningFee: r.planningFee, taxes: r.taxes, complete: r.complete, pending: r.unpriced.map(function (u) { return u.what === 'taxes' ? u.category.toLowerCase() + ' taxes' : u.category.toLowerCase(); }), includes: C.componentsLabel(r.components), asOf: t.priceAsOf || '' }
     };
   }
   function clientDoc(p) {
@@ -269,7 +311,7 @@
       h += '<section class="itin-sec"><h2>Your trip at a glance</h2><ul class="glance">' + booked.map(function (i) {
         return '<li><span class="ico">' + (icons[i.category] || '✦') + '</span><div><b>' + esc(i.category) + '</b><span>' + esc(i.description) + '</span>' +
           '<small>' + (i.date ? esc(fday(i.date)) : '') + (i.confirmation ? (i.date ? ' · ' : '') + 'Conf. ' + esc(i.confirmation) : '') + '</small></div>' +
-          (t.showItemPrices && i.included ? '<span class="pr">' + money(i.price) + '</span>' : '') + '</li>';
+          (t.showItemPrices && i.included ? '<span class="pr">' + (i.price == null ? '<small>To be confirmed</small>' : money(i.price) + (i.taxesPending ? '<small> + taxes TBC</small>' : '')) + '</span>' : '') + '</li>';
       }).join('') + '</ul></section>';
     }
     if (clinic.length) h += '<section class="itin-sec note"><h2>Appointment planning notes</h2><ul class="glance">' + clinic.map(function (i) { return '<li><span class="ico">🩺</span><div><b>' + esc(i.description) + '</b><small>' + esc(fday(i.date)) + '</small></div></li>'; }).join('') + '</ul><p class="tiny">Shown for travel planning only. Appointments are arranged and paid directly with your clinic. Always follow your clinic’s instructions.</p></section>';
@@ -279,26 +321,30 @@
           (d.body ? '<p>' + esc(d.body).replace(/\n/g, '<br>') + '</p>' : '') + '</div></li>';
       }).join('') + '</ol></section>';
     }
-    h += '<section class="itin-sec price"><h2>Trip investment</h2><div class="pbox"><div><small>Total</small><b>' + money(tot.clientTotal) + '</b></div><div><small>Per traveler (' + tot.travelers + ')</small><b>' + money(tot.perPerson) + '</b></div></div>' +
-      '<p class="tiny">Includes taxes and fees' + (tot.planningFee ? ' and a ' + money(tot.planningFee) + ' planning fee' : '') + '. Prices are subject to availability until booked and confirmed.</p></section>';
-    if (t.clientNotes) h += '<section class="itin-sec"><h2>Good to know</h2><p>' + esc(t.clientNotes).replace(/\n/g, '<br>') + '</p></section>';
+    var done = tot.complete !== false, pend = tot.pending || [];
+    h += '<section class="itin-sec price"><h2>Trip investment</h2><div class="pbox"><div><small>' + (done ? 'Total' : 'Estimated so far') + '</small><b>' + (done ? '' : 'From ') + money(tot.clientTotal) + '</b></div><div><small>Per traveler (' + tot.travelers + ')</small><b>' + (done && tot.perPerson != null ? money(tot.perPerson) : '<small>once fully priced</small>') + '</b></div></div>' +
+      (done ? '' : '<p class="tiny warnline">Still being priced: ' + esc(pend.join(', ')) + '.</p>') +
+      '<p class="tiny">' + (tot.includes ? 'Includes ' + esc(tot.includes) : 'Includes the bookings above') + (done ? ', with taxes and fees' : '') + (tot.planningFee ? ' and a ' + money(tot.planningFee) + ' planning fee' : '') + '. ' + (tot.asOf ? 'Estimate as of ' + esc(fdate(tot.asOf)) + '. ' : '') + 'Prices are subject to availability until booked and confirmed.</p></section>';
+    var gtk = t.goodToKnow || t.clientNotes;
+    if (gtk) h += '<section class="itin-sec"><h2>Good to know</h2><p>' + esc(gtk).replace(/\n/g, '<br>') + '</p></section>';
     h += '<footer class="itin-foot"><div class="fb">' + esc(b.brand) + '</div><p>' + esc(b.tagline) + '</p><p><b>' + esc(b.name) + '</b>, Travel Advisor with Fora Travel</p>' +
       '<p class="links">' + (b.link ? '<a href="' + esc(b.link) + '" target="_blank" rel="noopener">' + esc(b.link.replace(/^https?:\/\/(www\.)?/, '')) + '</a>' : '') +
-      (b.handle ? '<span>Instagram ' + esc(b.handle) + '</span>' : '') + (b.email ? '<a href="mailto:' + esc(b.email) + '">' + esc(b.email) + '</a>' : '') + (b.phone ? '<a href="tel:' + esc(b.phone) + '">' + esc(b.phone) + '</a>' : '') + '</p></footer></article>';
+      (b.handle ? '<span>Instagram ' + esc(b.handle) + '</span>' : '') + (b.email ? '<a href="mailto:' + esc(b.email) + '">' + esc(b.email) + '</a>' : '') + (b.phone ? '<a href="tel:' + esc(b.phone) + '">' + esc(b.phone) + '</a>' : '') + '</p><p class="tiny">' + esc(b.brand || 'Booked by Castleberry') + ' is an independent travel advisor affiliated with Fora Travel, Inc.</p></footer></article>';
     return h;
   }
   function previewBar(t) {
-    return '<div class="card pbar"><p class="muted">This is exactly what your client sees. Commission and private notes are never included.</p><div class="btns">' +
-      '<button class="btn primary" onclick="window.print()">Print / Save as PDF</button><button class="btn" data-act="share-link">Copy share link</button>' + (navigator.share ? '<button class="btn" data-act="native-share">Share…</button>' : '') + '</div>' +
-      '<p class="tiny muted">The share link holds the itinerary inside the link itself. Nothing is uploaded. Anyone who has the link can see it.</p></div>';
+    return '<div class="card pbar"><p class="muted">This is what your client sees. Commission and private notes are never included.</p><div class="btns">' +
+      '<button class="btn primary" data-act="print-check">Print / Save as PDF</button><button class="btn" data-act="make-link">Create client link</button></div>' +
+      '<p class="tiny muted">Client links are private, hard-to-guess links you can set to expire or turn off any time. Clinic appointments and private notes are left out. You need to be signed in.</p><div id="trip-links"></div></div>';
   }
   function b64e(str) { return btoa(unescape(encodeURIComponent(str))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
   function b64d(s) { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; return decodeURIComponent(escape(atob(s))); }
+  /* legacy (v1) links carried the itinerary in the URL. No longer generated in the UI; kept so old links still open read-only. */
   function shareUrl(t) { return location.href.split('#')[0] + '#/share/' + b64e(JSON.stringify(clientPayload(t))); }
   function renderShared(data) {
     document.getElementById('appbar').style.display = 'none';
     document.body.classList.add('client-mode', 'shared');
-    try { var p = JSON.parse(b64d(data)); app.innerHTML = '<div class="no-print sharebar"><button class="btn sm" onclick="window.print()">Print / Save PDF</button></div>' + clientDoc(p); document.title = (p.t.title || 'Itinerary') + ' · ' + (p.b.brand || ''); }
+    try { var p = JSON.parse(b64d(data)); app.innerHTML = '<div class="no-print sharebar"><span class="tiny">This is an older read-only link. Ask your advisor for a new one for the latest version.</span><button class="btn sm" onclick="window.print()">Print / Save PDF</button></div>' + clientDoc(p); document.title = (p.t.title || 'Itinerary') + ' · ' + (p.b.brand || ''); }
     catch (e) { app.innerHTML = '<div class="card empty">This itinerary link is incomplete. Ask your advisor to send it again.</div>'; }
   }
 
@@ -309,11 +355,15 @@
       '<li><b>Make a trip.</b> Trips → + New trip. Fill in client, dates and travelers.</li>' +
       '<li><b>Add bookings.</b> Base fare goes in <i>Base cost</i>. Taxes, port fees and gratuities go in <i>Taxes / fees</i> (no commission). The client total, per-person price, gross commission and your take-home update as you type.</li>' +
       '<li><b>Write the day-by-day.</b> “Fill in days from trip dates” creates one card per day.</li>' +
-      '<li><b>Send it.</b> Client itinerary → Print / Save as PDF, or Copy share link. Commission never appears there.</li>' +
-      '<li><b>Ask Jarvis to research a trip.</b> Open <a href="#/requests">Requests</a>, type what the client wants in plain English and tap Send. Jarvis finds cruises, flights and excursions and sends back 2–3 packages. Open a ready request to compare them, tap <i>Load into trip builder</i> to edit one here, or <i>Copy client message</i> to text the options.</li>' +
+      '<li><b>Send it.</b> Client itinerary → Print / Save as PDF, or <i>Create client link</i>. A short checklist comes up first (re-priced in Fora, taxes and fees, affiliation line, no private links). Commission never appears there.</li>' +
+      '<li><b>Sign in</b> on the Requests tab to see requests, leads and client links. They are stored on the server and only your account can read them.</li>' +
+      '<li><b>Ask ' + (safe() ? 'for research' : 'Jarvis to research a trip') + '.</b> Open <a href="#/requests">Requests</a>, type what the client wants in plain English and tap Send. 2–3 packages come back. Totals say “From $X + N items not yet priced” until everything has a price. Tap <i>Create client comparison link</i> to send the options side by side. The client taps “Choose this one”, and the request shows “Client chose Option X”.</li>' +
+      '<li><b>Leads.</b> Put your <i>Plan my trip</i> form link (' + esc(location.href.split('#')[0]) + '#/plan-my-trip) in your Instagram bio and Fora profile. New leads show under <a href="#/leads">Leads</a>. One tap turns a lead into a trip request.</li>' +
+      '<li><b>Goals.</b> Set each trip’s status on its Details tab (quote sent, booked, traveled, paid). <a href="#/goals">Goals</a> tracks your client goal, conversion and commission by payout month.</li>' +
+      '<li><b>Client-safe mode</b> (🛡 button at the top) hides commission and internal labels everywhere, for when a client is looking at your screen.</li>' +
       '<li><b>Back up.</b> Trips → Export backup. Your data lives only in this browser. Clearing Safari/Chrome data erases it unless you have a backup.</li></ol>' +
       '<p class="muted">Tip: on iPhone, tap Share → Add to Home Screen to open it like an app.</p>' +
-      '<p class="muted">This tool estimates commission from the rates you enter. Your Fora portal is the source of truth for actual payouts.</p></section>';
+      '<p class="muted">This tool estimates commission from the rates you enter. Your Fora portal is the source of truth for actual payouts. Prices found on the web are public estimates. Re-price in Fora before you quote.</p></section>';
   }
 
   /* ---------- live editing ---------- */
@@ -321,9 +371,9 @@
   function refreshSum(t) { var b = document.getElementById('sumbox'); if (b) b.innerHTML = sumBox(t); }
   function refreshItem(t, it, row) {
     var l = C.calcItem(it, db.settings);
-    row.querySelector('[data-out="price"]').textContent = money(l.clientPrice);
+    row.querySelector('[data-out="price"]').innerHTML = priceOut(l); row.classList.toggle('unpriced', !l.priced);
     row.querySelector('[data-out="comm"]').textContent = money(l.gross);
-    row.querySelector('[data-out="rate"]').textContent = '(' + l.rate + '%)';
+    row.querySelector('[data-out="rate"]').textContent = '(' + l.rate + '%' + (l.hold ? ', on hold' : '') + ')';
     var ro = row.querySelector('[data-i="rateOverride"]'), s = supplier(it.supplierId);
     if (ro) ro.placeholder = s ? s.commission : '0';
   }
@@ -334,7 +384,9 @@
     if (d.set) { db.settings[d.set] = val(el); if (d.set === 'foraSplit') db.settings.foraSplitPlaceholder = false; if (d.set === 'feeKeep') db.settings.feeKeepPlaceholder = false; save(); return; }
     if (d.sup) { var row = el.closest('[data-sid]'), s = supplier(row.dataset.sid); s[d.sup] = val(el); if (d.sup === 'commission' && e.type === 'change') { s.placeholder = false; row.classList.remove('isph'); } save(); return; }
     if (!t || !location.hash.includes(t.id)) return;
-    if (d.t) { t[d.t] = val(el); if (d.t === 'title') { var h1 = app.querySelector('.trip-head h1'); if (h1) h1.textContent = t.title || 'Untitled trip'; } save(); refreshSum(t); return; }
+    if (d.t) { t[d.t] = val(el);
+      if (d.t === 'stage' && e.type === 'change') { var today = iso(new Date()); if (t.stage === 'quoted' && !t.quotedAt) t.quotedAt = today; if (/booked|traveled|paid/.test(t.stage) && !t.bookedAt) t.bookedAt = today; if (t.stage === 'paid' && !t.paidMonth) t.paidMonth = today.slice(0, 7); save(true); return renderTrip(t, 'details'); }
+      if (d.t === 'priceOverride') { save(true); return refreshSum(t); } if (d.t === 'title') { var h1 = app.querySelector('.trip-head h1'); if (h1) h1.textContent = t.title || 'Untitled trip'; } save(); refreshSum(t); return; }
     if (d.i) {
       var r = el.closest('[data-iid]'), it = t.items.find(function (x) { return x.id === r.dataset.iid; });
       it[d.i] = val(el);
@@ -359,6 +411,8 @@
       case 'add-sup': db.settings.suppliers.push({ id: uid('s'), name: '', type: 'Other', commission: 10, notes: '', placeholder: false }); save(true); renderSettings(); var ins = app.querySelectorAll('.sn'); ins[ins.length - 1].focus(); return;
       case 'del-sup': if (confirm('Delete this supplier? Bookings that use it will show 0% until you pick another.')) { db.settings.suppliers = db.settings.suppliers.filter(function (x) { return x.id !== tid; }); save(true); renderSettings(); } return;
       case 'confirm-sup': supplier(tid).placeholder = false; save(true); return renderSettings();
+      case 'rates-confirm': if (placeholdersLeft()) { toast('Replace the placeholder rates first'); return; } db.settings.ratesConfirmed = true; db.settings.ratesConfirmedAt = iso(new Date()); save(true); toast('Rates confirmed'); return renderSettings();
+      case 'rates-unconfirm': db.settings.ratesConfirmed = false; save(true); return renderSettings();
       case 'add-item':
         var cat = b.dataset.cat, it = { id: uid('i'), category: cat, description: '', supplierId: '', cost: '', taxes: '', date: t.startDate || '', confirmation: '', notes: '' };
         if (cat === 'Clinic appointment') { it.nonCommissionable = true; it.includeInTotal = false; }
@@ -391,12 +445,12 @@
       var added = 0; for (var dt = new Date(s0); dt <= e0 && added < 120; dt.setDate(dt.getDate() + 1)) { var k = iso(dt); if (!have[k]) { t.days.push({ date: k, title: '', location: '', body: '' }); added++; } }
       t.days.sort(function (p, q) { return (p.date || '') < (q.date || '') ? -1 : 1; }); save(true); toast(added ? 'Added ' + added + ' day' + (added === 1 ? '' : 's') : 'All dates already have a day'); return renderTrip(t, 'days');
     }
-    if (a === 'share-link') { var u = shareUrl(t); (navigator.clipboard ? navigator.clipboard.writeText(u) : Promise.reject()).then(function () { toast('Share link copied'); }, function () { prompt('Copy this link:', u); }); return; }
-    if (a === 'native-share') { navigator.share({ title: t.title, text: 'Your itinerary from ' + db.settings.brand, url: shareUrl(t) }).catch(function () {}); }
+    if (a === 'make-link') return window.TSProp.makeTripLink(t);
+    if (a === 'print-check') { var pr = C.calcTrip(t, db.settings); if (!pr.complete && !t.priceOverride) { alert(pr.unpricedCount + ' item(s) are not yet priced. Price them, or tick “Send anyway” in the trip math box (Bookings tab).'); return; } return window.TSSafe.checklist({ text: JSON.stringify(window.TSProp.itineraryPayload(t)), action: 'Print', proposal: false, print: true }, function () { window.print(); }); }
   });
 
   /* expose for tests */
-  window.__TS = { db: function () { return db; }, clientPayload: clientPayload, clientDoc: clientDoc, b64e: b64e, b64d: b64d, shareUrl: shareUrl };
-  window.TS = { db: function () { return db; }, save: save, route: route, toast: toast, esc: esc, money: money, uid: uid, clone: clone, fdate: fdate, fday: fday, pd: pd, iso: iso, app: app };
+  window.__TS = { db: function () { return db; }, clientPayload: clientPayload, clientDoc: clientDoc, b64e: b64e, b64d: b64d, legacyShareUrl: shareUrl };
+  window.TS = { db: function () { return db; }, save: save, route: route, toast: toast, esc: esc, money: money, uid: uid, clone: clone, fdate: fdate, fday: fday, pd: pd, iso: iso, app: app, STAGES: STAGES, defaultPayoutMonth: defaultPayoutMonth, ratesOk: ratesOk };
   load(); route();
 })();

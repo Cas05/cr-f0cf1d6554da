@@ -156,3 +156,53 @@ body.shared main{padding-top:14px}
 .cav{font-size:.82rem;color:#45525c;padding-left:18px;margin:6px 0}
 @media (max-width:560px){.pkgs{grid-template-columns:1fr}.appbar{padding-left:12px;padding-right:10px}.appbar nav{gap:2px}.appbar nav a{padding:6px 7px;font-size:.8rem}}
 @media (max-width:480px){.brand strong{display:none}}
+/* ---------- v3 ---------- */
+.appbar{flex-wrap:wrap}
+.appbar nav{overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;max-width:100%}
+.appbar nav::-webkit-scrollbar{display:none}
+.safe-btn{background:transparent;border:1px solid rgba(255,255,255,.35);color:#fff;border-radius:999px;padding:5px 9px;font-size:.85rem;cursor:pointer;min-height:34px}
+.safe-btn .safe-on{display:none;margin-left:4px;font-size:.75rem}
+.client-safe .safe-btn{background:var(--gold2);color:var(--navy);border-color:var(--gold2)}
+.client-safe .safe-btn .safe-on{display:inline}
+.client-safe .private,.client-safe .earn,.client-safe [data-nav="settings"],.client-safe .ratewarn{display:none!important}
+.client-safe .tabs a[href$="/earnings"]{display:none}
+@media (max-width:640px){.appbar{gap:6px}.appbar nav{order:3;width:100%;justify-content:flex-start}.appbar .brand{flex:1}}
+.banner.ok{background:#e9f6ee;border:1px solid #b6dfc4;color:#1d5a35}
+.okline{color:#1d6b3a;font-weight:500}
+.st-chosen{background:#e9f6ee;color:#1d5a35}
+.tag.stage{margin-right:6px}.st-booked,.st-traveled,.st-paid{background:#e9f6ee;color:#1d5a35}.st-quoted{background:#fff4dc;color:#7a5200}.st-lost,.st-spam{background:#f1f1f1;color:#666}.st-contacted{background:#e7f0fb;color:#1f4d80}
+.item.unpriced{border-left:4px solid #d9a441}
+tr.unpriced td{background:#fffaf0}
+.pk-tot.partial b[data-tot]{font-size:1rem}
+.check.ov{margin:8px 0}
+.login input{font-size:16px}
+.modal{position:fixed;inset:0;z-index:50;background:rgba(15,25,35,.55);display:flex;align-items:flex-end;justify-content:center;padding:0}
+.modal-box{background:#fff;width:100%;max-width:560px;max-height:92vh;overflow:auto;border-radius:16px 16px 0 0;padding:18px 18px calc(18px + env(safe-area-inset-bottom))}
+@media (min-width:641px){.modal{align-items:center;padding:20px}.modal-box{border-radius:16px}}
+.cklist{list-style:none;padding:0;margin:0 0 6px}.cklist li{padding:8px 0;border-bottom:1px solid #eee}
+.cklist li.auto.ok label{color:#1d6b3a}.cklist li.auto.bad label{color:#a33}
+.mt{margin-top:10px}
+.plinks{list-style:none;padding:0;margin:0}.plinks li{padding:10px 0;border-bottom:1px solid #eee;display:flex;flex-direction:column;gap:4px}
+.urlbox{background:#f5f2ec;border-radius:10px;padding:10px;word-break:break-all;margin:8px 0}
+.lead h3{margin:.3em 0 .1em}
+.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.intake .fields{max-width:560px}.intake input,.intake select,.intake textarea{font-size:16px}
+.thanks{padding:20px 0;text-align:center}
+.cmp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;padding:16px}
+.cmp-opt{border:1px solid #e3ddd2;border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:6px;background:#fff}
+.cmp-opt.picked{border:2px solid #2e7d4f;box-shadow:0 0 0 3px #e9f6ee}
+.cmp-opt h2{font:600 1.35rem var(--serif);margin:0}
+.cmp-sec h3{font-size:.95rem;margin:.4em 0 .2em}.cmp-sec p{margin:.2em 0}
+.cmp-tot{background:#f7f3ea;border-radius:10px;padding:10px;display:flex;flex-direction:column;margin-top:auto}
+.cmp-tot b{font-size:1.4rem}
+.cmp-opt .choose{margin-top:8px;width:100%;min-height:44px}
+.dep{text-align:center}
+.bar{height:10px;background:#eee;border-radius:99px;overflow:hidden;margin:8px 0}.bar span{display:block;height:100%;background:var(--gold2)}
+svg.pace{width:100%;max-width:520px;height:auto;display:block;margin:8px 0}
+svg.pace .ax{stroke:#bbb}svg.pace .goal{stroke:#c9a24a;stroke-dasharray:5 4;stroke-width:2}svg.pace .act{fill:none;stroke:#1f3a4d;stroke-width:3}svg.pace .now{stroke:#999;stroke-dasharray:2 3}
+svg.pace text{font-size:10px;fill:#666}
+.kpis.g5{grid-template-columns:repeat(5,1fr)}
+@media (max-width:640px){.kpis.g5{grid-template-columns:repeat(3,1fr)}}
+.sharebar{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+@media print{.modal{display:none!important}.cmp-grid{grid-template-columns:repeat(3,1fr)}}
+.itin.cmp{max-width:1180px}.shared main:has(.cmp){max-width:1220px}
